@@ -3,5 +3,5 @@
 ### 1. Khởi chạy ứng dụng
 
 ```bash
-python .\manage.py runserver 192.168.1.31:8000
+python .\manage.py runserver <your ipv4 address>:<port>
 ```

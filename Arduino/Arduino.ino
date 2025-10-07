@@ -5,11 +5,11 @@
 #include <WebServer.h>
 
 // Cấu hình WiFi
-const char* ssid = "PTIT.HCM_CanBo";
-const char* password = "";
+const char* ssid = "Nha Tro Hanh Phuc_5G";
+const char* password = "13681368";
 
 // Server Django
-const char* serverUrl = "http://10.252.3.209:8000/api/command/";
+const char* serverUrl = "http://192.168.1.20:8000/api/command/";
 
 // Định nghĩa chân điều khiển
 #define ENA 19
