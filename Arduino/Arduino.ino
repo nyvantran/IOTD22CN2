@@ -5,9 +5,17 @@
 #include <WebServer.h>
 
 // Cấu hình WiFi
-const char* ssid = "Liam";
-const char* password = "12345678";
-const char* serverUrl = "http://172.20.10.2:8000/api/command/";
+const char* ssid = "PTIT.HCM_CanBo";
+const char* password = "";
+const char* serverUrl = "http://10.252.15.239:8000/api/command/";
+
+// Cấu hình speed
+const int kickstartspeed = 150;
+const int maxspeed = 255;
+const int kickstarttime = 100;
+
+// chế độ hiện tại
+const char* currenttask = "stop";
 
 // Motor pins
 #define ENA 19
@@ -116,15 +124,23 @@ void motorTask(void* parameter) {
           currentSpeed = speed;
 
           // Execute command directly in this task
+          if (strcmp(command, currenttask) != 0 and strcmp(command, "stop") != 0) {
+            kickStart(maxspeed);
+          }
           if (strcmp(command, "forward") == 0) {
+            currenttask = "forward";
             moveForward(speed);
           } else if (strcmp(command, "backward") == 0) {
+            currenttask = "backward";
             moveBackward(speed);
           } else if (strcmp(command, "left") == 0) {
+            currenttask = "left";
             turnLeft(speed);
           } else if (strcmp(command, "right") == 0) {
+            currenttask = "right";
             turnRight(speed);
           } else if (strcmp(command, "stop") == 0) {
+            currenttask = "stop";
             stopCar();
           }
         }
@@ -235,24 +251,36 @@ void loop() {
   vTaskDelay(1);
 }
 
+// Kickstart Motor functions
+void kickStart(int speed) {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+  ledcWrite(ENA, speed);
+  ledcWrite(ENB, speed);
+  delay(kickstarttime);
+  // Serial.printf("Kickstart at speed %d\n", speed);
+}
+
 // Motor control functions
 void turnRight(int speed) {
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
-  ledcWrite(ENA, speed);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+  ledcWrite(ENA, maxspeed - 50);
   ledcWrite(ENB, speed);
   // Serial.printf("Forward at speed %d\n", speed);
 }
 
 void turnLeft(int speed) {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
   ledcWrite(ENA, speed);
-  ledcWrite(ENB, speed);
+  ledcWrite(ENB, maxspeed - 50);
   // Serial.printf("Backward at speed %d\n", speed);
 }
 

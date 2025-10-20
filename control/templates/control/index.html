@@ -188,7 +188,7 @@
     });
     const esp32IP = prompt("Nhập IP của ESP32-CAM:");
     if (esp32IP) {
-        document.getElementById('camera-stream').src = `http://${esp32IP}/stream`;
+        document.getElementById('camera-stream').src = esp32IP;
     }
 </script>
 </body>
