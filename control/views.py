@@ -23,6 +23,7 @@ MIN_CONFIDENCE = 0.50
 
 # Biến lưu trạng thái hiện tại
 current_command = {'command': 'stop', 'speed': 150}
+last_analysis_result = {"detections": [], "status": "idle"}
 
 
 def index(request):
@@ -63,9 +64,12 @@ def command_history(request):
 
 @api_view(['GET'])
 def analyze_stream_once(request):
+    global last_analysis_result
+
     if not yolo_model:
+        last_analysis_result = {"detections": [], "status": "error", "error_msg": "Model not loaded"}
         return Response(
-            {"error": "Model YOLO không khả dụng"}, 
+            last_analysis_result, 
             status=500
         )
 
@@ -81,22 +85,16 @@ def analyze_stream_once(request):
                 status=504 
             )
 
-        # 2. Đọc một khung hình
         ret, frame = cap.read()
         
-        # 3. Ngắt kết nối ngay lập tức để giải phóng tài nguyên
         cap.release()
 
         if not ret or frame is None:
-            return Response(
-                {"error": "Không thể đọc khung hình từ stream"}, 
-                status=500
-            )
+            last_analysis_result = {"detections": [], "status": "error", "error_msg": "Cannot read frame"}
+            return Response(last_analysis_result, status=500)
 
-        # 4. Chạy YOLO trên khung hình
         results = yolo_model(frame, verbose=False)
 
-        # 5. Xử lý kết quả
         detections = []
         for r in results:
             for box in r.boxes:
@@ -110,26 +108,38 @@ def analyze_stream_once(request):
                         "do_tin_cay": round(confidence, 2)
                     })
 
-        # 6. Trả về kết quả
-        return Response({"detections": detections, "status": "success"})
+        if detections:
+            last_analysis_result = {"detections": detections, "status": "success"}
+        else:
+            last_analysis_result = {"detections": [], "status": "no_detection"}
+        
+        return Response(last_analysis_result)
 
     except Exception as e:
         if cap:
-            cap.release() # Đảm bảo giải phóng nếu có lỗi
-        return Response({"error": f"Lỗi xử lý: {str(e)}"}, status=500)
+            cap.release() 
+        last_analysis_result = {"detections": [], "status": "error", "error_msg": str(e)}
+        return Response(last_analysis_result, status=500)
     
+
+@api_view(['GET'])
+def get_analysis_result(request):
+    global last_analysis_result
+    return Response(last_analysis_result)
 
 @csrf_exempt
 @api_view(['POST'])
 def detect_uploaded_image(request):
     """
     API cho phép người dùng tải ảnh lên để YOLO phân tích.
-    Có thể gửi:
-    - file: multipart/form-data, key='image'
-    - hoặc JSON: {"image": "<base64 string>"}
+    KẾT QUẢ SẼ ĐƯỢC CẬP NHẬT VÀO BIẾN TOÀN CỤC `last_analysis_result`.
     """
+    global last_analysis_result  # <--- Sử dụng biến toàn cục
+    
     if not yolo_model:
-        return Response({"error": "Model YOLO không khả dụng"}, status=500)
+        error_msg = "Model YOLO không khả dụng"
+        last_analysis_result = {"detections": [], "status": "error", "error_msg": error_msg}
+        return Response({"error": error_msg}, status=500)
 
     try:
         image = None
@@ -143,17 +153,17 @@ def detect_uploaded_image(request):
         # 2️⃣ Nếu gửi base64 qua JSON
         elif 'image' in request.data:
             img_data = request.data['image']
-            # Loại bỏ tiền tố nếu có
             if img_data.startswith("data:image"):
                 img_data = img_data.split(",")[1]
             img_bytes = base64.b64decode(img_data)
             np_arr = np.frombuffer(img_bytes, np.uint8)
             image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-
         else:
+            last_analysis_result = {"detections": [], "status": "error", "error_msg": "Thiếu ảnh"}
             return Response({"error": "Thiếu ảnh đầu vào"}, status=400)
 
         if image is None:
+            last_analysis_result = {"detections": [], "status": "error", "error_msg": "Không thể đọc ảnh"}
             return Response({"error": "Không thể đọc ảnh"}, status=400)
 
         # 3️⃣ Chạy YOLO
@@ -175,12 +185,30 @@ def detect_uploaded_image(request):
         annotated_frame = results[0].plot()
         _, buffer = cv2.imencode('.jpg', annotated_frame)
         base64_result = base64.b64encode(buffer).decode('utf-8')
+        annotated_image_data = f"data:image/jpeg;base64,{base64_result}"
 
+        # 5️⃣ 🔹 CẬP NHẬT BIẾN TOÀN CỤC 🔹
+        if detections:
+            last_analysis_result = {
+                "detections": detections, 
+                "status": "success",
+                "annotated_image": annotated_image_data  # Gửi cả ảnh đã vẽ
+            }
+        else:
+            last_analysis_result = {
+                "detections": [], 
+                "status": "no_detection",
+                "annotated_image": annotated_image_data
+            }
+
+        # Trả về kết quả cho người tải lên
         return Response({
             "status": "success",
             "detections": detections,
-            "annotated_image": f"data:image/jpeg;base64,{base64_result}"
+            "annotated_image": annotated_image_data
         })
 
     except Exception as e:
-        return Response({"error": str(e)}, status=500)
+        error_msg = f"Lỗi xử lý: {str(e)}"
+        last_analysis_result = {"detections": [], "status": "error", "error_msg": error_msg}
+        return Response({"error": error_msg}, status=500)

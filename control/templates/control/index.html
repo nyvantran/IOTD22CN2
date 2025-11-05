@@ -122,6 +122,11 @@
     <div class="status" id="status">
         Trạng thái: Đang chờ lệnh...
     </div>
+
+    <div class="status" id="analysis-status" style="background-color: #fffbe7; margin-top: 10px;">
+        Phân tích: Đang chờ...
+    </div>
+</div>
 </div>
 
 <script>
@@ -190,6 +195,41 @@
     if (esp32IP) {
         document.getElementById('camera-stream').src = esp32IP;
     }
+
+    function updateAnalysisDisplay(data) {
+        const analysisDiv = document.getElementById('analysis-status');
+
+        if (data.status === 'success' && data.detections.length > 0) {
+            let firstSign = data.detections[0];
+            let confidencePercent = (firstSign.do_tin_cay * 100).toFixed(0);
+
+            analysisDiv.textContent = 
+                `Phát hiện: ${firstSign.bien_bao} (${confidencePercent}%)`;
+            analysisDiv.style.backgroundColor = "#dcedc8"; 
+
+        } else if (data.status === 'no_detection') {
+            analysisDiv.textContent = "Phân tích: Không thấy biển báo.";
+            analysisDiv.style.backgroundColor = "#fffbe7"; 
+
+        } else if (data.status === 'error') {
+            analysisDiv.textContent = "Lỗi phân tích: " + data.error_msg;
+            analysisDiv.style.backgroundColor = "#ffcdd2"; 
+        }
+    }
+
+    async function fetchAnalysisResult() {
+        try {
+            const response = await fetch('/api/get-analysis/');
+            const data = await response.json();
+            updateAnalysisDisplay(data);
+
+        } catch (error) {
+            console.error('Lỗi khi lấy kết quả phân tích:', error);
+            document.getElementById('analysis-status').textContent = 'Lỗi kết nối phân tích.';
+        }
+    }
+
+    setInterval(fetchAnalysisResult, 2000);
 </script>
 </body>
 </html>
