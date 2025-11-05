@@ -6,4 +6,6 @@ urlpatterns = [
     path('api/command/', views.get_command, name='get_command'),
     path('api/set-command/', views.set_command, name='set_command'),
     path('api/history/', views.command_history, name='command_history'),
+    path('api/analyze-stream/', views.analyze_stream_once, name='analyze_stream'),
+    path('api/detect/', views.detect_uploaded_image, name='detect_uploaded_image'),
 ]
