@@ -4,6 +4,7 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import Command
+from .models import Command, DetectionResult
 import json
 import base64
 
@@ -68,6 +69,7 @@ def analyze_stream_once(request):
 
     if not yolo_model:
         last_analysis_result = {"detections": [], "status": "error", "error_msg": "Model not loaded"}
+        DetectionResult.objects.create(status="error", error_msg="Model not loaded")
         return Response(
             last_analysis_result, 
             status=500
@@ -90,6 +92,7 @@ def analyze_stream_once(request):
         cap.release()
 
         if not ret or frame is None:
+            DetectionResult.objects.create(status="error", error_msg="Cannot read frame")
             last_analysis_result = {"detections": [], "status": "error", "error_msg": "Cannot read frame"}
             return Response(last_analysis_result, status=500)
 
@@ -109,8 +112,16 @@ def analyze_stream_once(request):
                     })
 
         if detections:
+            result_obj = DetectionResult.objects.create(
+                detections=detections,
+                status="success"
+            )
             last_analysis_result = {"detections": detections, "status": "success"}
         else:
+            result_obj = DetectionResult.objects.create(
+                detections=[],
+                status="no_detection"
+            )
             last_analysis_result = {"detections": [], "status": "no_detection"}
         
         return Response(last_analysis_result)
@@ -118,6 +129,7 @@ def analyze_stream_once(request):
     except Exception as e:
         if cap:
             cap.release() 
+        DetectionResult.objects.create(status="error", error_msg=str(e))
         last_analysis_result = {"detections": [], "status": "error", "error_msg": str(e)}
         return Response(last_analysis_result, status=500)
     
@@ -126,6 +138,21 @@ def analyze_stream_once(request):
 def get_analysis_result(request):
     global last_analysis_result
     return Response(last_analysis_result)
+    # try:
+    #     latest_result = DetectionResult.objects.first() 
+        
+    #     if latest_result:
+    #         return Response({
+    #             "detections": latest_result.detections,
+    #             "status": latest_result.status,
+    #             "error_msg": latest_result.error_msg,
+    #             "timestamp": latest_result.timestamp 
+    #         })
+    #     else:
+    #         return Response({"detections": [], "status": "idle"})
+            
+    # except Exception as e:
+    #     return Response({"error": str(e)}, status=500)
 
 @csrf_exempt
 @api_view(['POST'])
@@ -201,6 +228,15 @@ def detect_uploaded_image(request):
                 "annotated_image": annotated_image_data
             }
 
+        if detections:
+            status = "success"
+        else:
+            status = "no_detection"
+            
+        DetectionResult.objects.create(
+            detections=detections,
+            status=status
+        )
         # Trả về kết quả cho người tải lên
         return Response({
             "status": "success",

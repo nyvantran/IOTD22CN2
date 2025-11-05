@@ -16,3 +16,14 @@ class Command(models.Model):
 
     class Meta:
         ordering = ['-timestamp']
+
+class DetectionResult(models.Model):
+    timestamp = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, default='idle')
+    
+    detections = models.JSONField(default=list) 
+    
+    error_msg = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        ordering = ['-timestamp']
