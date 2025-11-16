@@ -1,10 +1,11 @@
 from django.shortcuts import render
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import Command
 from .models import Command, DetectionResult
+# from .stream_manager import stream_manager
 import json
 import base64
 
@@ -13,13 +14,13 @@ import cv2
 import numpy as np
 
 try:
-    yolo_model = YOLO("../model/best.pt") 
+    yolo_model = YOLO("../model/best.pt")
     print("====== MODEL YOLO ĐÃ TẢI THÀNH CÔNG ======")
 except Exception as e:
     yolo_model = None
     print(f"====== LỖI KHI TẢI MODEL YOLO: {e} ======")
 
-ESP32_STREAM_URL = "http://192.168.1.50/stream"
+ESP32_STREAM_URL = "http://192.168.0.106/stream"
 MIN_CONFIDENCE = 0.50
 
 # Biến lưu trạng thái hiện tại
@@ -63,6 +64,7 @@ def command_history(request):
             for c in commands]
     return Response(data)
 
+
 @api_view(['GET'])
 def analyze_stream_once(request):
     global last_analysis_result
@@ -71,24 +73,24 @@ def analyze_stream_once(request):
         last_analysis_result = {"detections": [], "status": "error", "error_msg": "Model not loaded"}
         DetectionResult.objects.create(status="error", error_msg="Model not loaded")
         return Response(
-            last_analysis_result, 
+            last_analysis_result,
             status=500
         )
 
     cap = None
     try:
         cap = cv2.VideoCapture(ESP32_STREAM_URL)
-        
-        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000) 
+
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
 
         if not cap.isOpened():
             return Response(
-                {"error": f"Không thể kết nối đến stream: {ESP32_STREAM_URL}"}, 
-                status=504 
+                {"error": f"Không thể kết nối đến stream: {ESP32_STREAM_URL}"},
+                status=504
             )
 
         ret, frame = cap.read()
-        
+
         cap.release()
 
         if not ret or frame is None:
@@ -104,7 +106,7 @@ def analyze_stream_once(request):
                 class_id = int(box.cls)
                 class_name = yolo_model.names[class_id]
                 confidence = float(box.conf)
-                
+
                 if confidence > MIN_CONFIDENCE:
                     detections.append({
                         "bien_bao": class_name,
@@ -123,16 +125,16 @@ def analyze_stream_once(request):
                 status="no_detection"
             )
             last_analysis_result = {"detections": [], "status": "no_detection"}
-        
+
         return Response(last_analysis_result)
 
     except Exception as e:
         if cap:
-            cap.release() 
+            cap.release()
         DetectionResult.objects.create(status="error", error_msg=str(e))
         last_analysis_result = {"detections": [], "status": "error", "error_msg": str(e)}
         return Response(last_analysis_result, status=500)
-    
+
 
 @api_view(['GET'])
 def get_analysis_result(request):
@@ -140,7 +142,7 @@ def get_analysis_result(request):
     return Response(last_analysis_result)
     # try:
     #     latest_result = DetectionResult.objects.first() 
-        
+
     #     if latest_result:
     #         return Response({
     #             "detections": latest_result.detections,
@@ -150,9 +152,10 @@ def get_analysis_result(request):
     #         })
     #     else:
     #         return Response({"detections": [], "status": "idle"})
-            
+
     # except Exception as e:
     #     return Response({"error": str(e)}, status=500)
+
 
 @csrf_exempt
 @api_view(['POST'])
@@ -162,7 +165,7 @@ def detect_uploaded_image(request):
     KẾT QUẢ SẼ ĐƯỢC CẬP NHẬT VÀO BIẾN TOÀN CỤC `last_analysis_result`.
     """
     global last_analysis_result  # <--- Sử dụng biến toàn cục
-    
+
     if not yolo_model:
         error_msg = "Model YOLO không khả dụng"
         last_analysis_result = {"detections": [], "status": "error", "error_msg": error_msg}
@@ -217,13 +220,13 @@ def detect_uploaded_image(request):
         # 5️⃣ 🔹 CẬP NHẬT BIẾN TOÀN CỤC 🔹
         if detections:
             last_analysis_result = {
-                "detections": detections, 
+                "detections": detections,
                 "status": "success",
                 "annotated_image": annotated_image_data  # Gửi cả ảnh đã vẽ
             }
         else:
             last_analysis_result = {
-                "detections": [], 
+                "detections": [],
                 "status": "no_detection",
                 "annotated_image": annotated_image_data
             }
@@ -232,7 +235,7 @@ def detect_uploaded_image(request):
             status = "success"
         else:
             status = "no_detection"
-            
+
         DetectionResult.objects.create(
             detections=detections,
             status=status

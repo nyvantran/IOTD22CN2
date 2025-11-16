@@ -5,14 +5,14 @@
 #include <WebServer.h>
 
 // Cấu hình WiFi
-const char* ssid = "PTIT.HCM_CanBo";
-const char* password = "";
-const char* serverUrl = "http://10.252.15.239:8000/api/command/";
+const char* ssid = "Văn Phòng Đoàn";
+const char* password = "doantnhvcs";
+const char* serverUrl = "http://192.168.0.104:8000/api/command/";
 
 // Cấu hình speed
 const int kickstartspeed = 150;
 const int maxspeed = 255;
-const int kickstarttime = 100;
+const int kickstarttime = 300;
 
 // chế độ hiện tại
 const char* currenttask = "stop";
@@ -124,7 +124,7 @@ void motorTask(void* parameter) {
           currentSpeed = speed;
 
           // Execute command directly in this task
-          if (strcmp(command, currenttask) != 0 and strcmp(command, "stop") != 0) {
+          if (strcmp(command, currenttask) != 0 and strcmp(command, "stop") != 0 and strcmp(currenttask, "stop") == 0) {
             kickStart(maxspeed);
           }
           if (strcmp(command, "forward") == 0) {
@@ -269,8 +269,8 @@ void turnRight(int speed) {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-  ledcWrite(ENA, maxspeed - 50);
-  ledcWrite(ENB, speed);
+  ledcWrite(ENA, speed + 50);
+  ledcWrite(ENB, speed - 25);
   // Serial.printf("Forward at speed %d\n", speed);
 }
 
@@ -279,8 +279,8 @@ void turnLeft(int speed) {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-  ledcWrite(ENA, speed);
-  ledcWrite(ENB, maxspeed - 50);
+  ledcWrite(ENA, speed - 25);
+  ledcWrite(ENB, speed + 50);
   // Serial.printf("Backward at speed %d\n", speed);
 }
 

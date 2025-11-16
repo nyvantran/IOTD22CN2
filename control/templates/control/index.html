@@ -96,7 +96,7 @@
     <h1>Điều khiển xe Robot</h1>
     <div class="camera-view">
         <h2>Camera View</h2>
-        <img id="camera-stream" src="" alt="Camera stream">
+{#        <img id="camera-stream" src="http://192.168.1.18/stream" alt="Camera stream">#}
     </div>
 
     <div class="controls">
@@ -126,7 +126,6 @@
     <div class="status" id="analysis-status" style="background-color: #fffbe7; margin-top: 10px;">
         Phân tích: Đang chờ...
     </div>
-</div>
 </div>
 
 <script>
@@ -166,22 +165,22 @@
     // Điều khiển bằng bàn phím
     document.addEventListener('keydown', (event) => {
         switch (event.key) {
-            case 'ArrowUp':
+            {#case 'ArrowUp':#}
             case 'w':
             case 'W':
                 sendCommand('forward');
                 break;
-            case 'ArrowDown':
+            {#case 'ArrowDown':#}
             case 's':
             case 'S':
                 sendCommand('backward');
                 break;
-            case 'ArrowLeft':
+            {#case 'ArrowLeft':#}
             case 'a':
             case 'A':
                 sendCommand('left');
                 break;
-            case 'ArrowRight':
+            {#case 'ArrowRight':#}
             case 'd':
             case 'D':
                 sendCommand('right');
