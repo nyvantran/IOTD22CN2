@@ -5,9 +5,10 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import Command
 from .models import Command, DetectionResult
-# from .stream_manager import stream_manager
+from .stream_manager import stream_manager
 import json
 import base64
+import time
 
 from ultralytics import YOLO
 import cv2
@@ -20,7 +21,6 @@ except Exception as e:
     yolo_model = None
     print(f"====== LỖI KHI TẢI MODEL YOLO: {e} ======")
 
-ESP32_STREAM_URL = "http://192.168.0.106/stream"
 MIN_CONFIDENCE = 0.50
 
 # Biến lưu trạng thái hiện tại
@@ -77,26 +77,14 @@ def analyze_stream_once(request):
             status=500
         )
 
-    cap = None
+    stream_manager.start()
+    frame = None
     try:
-        cap = cv2.VideoCapture(ESP32_STREAM_URL)
+        frame = stream_manager.get_latest_frame()
 
-        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
-
-        if not cap.isOpened():
-            return Response(
-                {"error": f"Không thể kết nối đến stream: {ESP32_STREAM_URL}"},
-                status=504
-            )
-
-        ret, frame = cap.read()
-
-        cap.release()
-
-        if not ret or frame is None:
-            DetectionResult.objects.create(status="error", error_msg="Cannot read frame")
-            last_analysis_result = {"detections": [], "status": "error", "error_msg": "Cannot read frame"}
-            return Response(last_analysis_result, status=500)
+        if frame is None:
+            DetectionResult.objects.create(status="error", error_msg="Stream not ready or failed to get frame")
+            return Response({"detections": [], "status": "error", "error_msg": "Stream not ready"}, status=503)
 
         results = yolo_model(frame, verbose=False)
 
@@ -236,10 +224,10 @@ def detect_uploaded_image(request):
         else:
             status = "no_detection"
 
-        DetectionResult.objects.create(
-            detections=detections,
-            status=status
-        )
+        # DetectionResult.objects.create(
+        #     detections=detections,
+        #     status=status
+        # )
         # Trả về kết quả cho người tải lên
         return Response({
             "status": "success",

@@ -111,6 +111,9 @@
         <button class="empty"></button>
         <button onclick="sendCommand('backward')">⬇️ Lùi</button>
         <button class="empty"></button>
+        
+        <button style="background-color: #008CBA;" onclick="runAnalysisTest()">🔬 Test</button>
+
     </div>
 
     <div class="speed-control">
@@ -159,6 +162,22 @@
             console.error('Error:', error);
             document.getElementById('status').textContent =
                 'Lỗi: Không thể gửi lệnh';
+        }
+    }
+
+    async function runAnalysisTest() {
+        const analysisDiv = document.getElementById('analysis-status');
+        analysisDiv.textContent = "Đang test, vui lòng chờ 2-3s...";
+        analysisDiv.style.backgroundColor = "#ffeb3b"; // Màu vàng đậm
+
+        try {
+            const response = await fetch('/api/analyze-stream/');
+
+            console.log("Đã gửi yêu cầu test phân tích.");
+
+        } catch (error) {
+            console.error('Lỗi khi test phân tích:', error);
+            analysisDiv.textContent = 'Lỗi: Không thể chạy test.';
         }
     }
 
@@ -228,7 +247,7 @@
         }
     }
 
-    setInterval(fetchAnalysisResult, 2000);
+    setInterval(fetchAnalysisResult, 1000);
 </script>
 </body>
 </html>
