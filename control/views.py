@@ -117,8 +117,6 @@ def analyze_stream_once(request):
         return Response(last_analysis_result)
 
     except Exception as e:
-        if cap:
-            cap.release()
         DetectionResult.objects.create(status="error", error_msg=str(e))
         last_analysis_result = {"detections": [], "status": "error", "error_msg": str(e)}
         return Response(last_analysis_result, status=500)

@@ -112,7 +112,7 @@
         <button onclick="sendCommand('backward')">⬇️ Lùi</button>
         <button class="empty"></button>
         
-        <button style="background-color: #008CBA;" onclick="runAnalysisTest()">🔬 Test</button>
+        <button id="btn-auto" style="background-color: #ff9800;" onclick="toggleAutoDetect()">🔄 Detect: OFF</button>
 
     </div>
 
@@ -133,6 +133,7 @@
 
 <script>
     let currentSpeed = 150;
+    let autoDetectInterval = null;  
 
     function updateSpeed(value) {
         currentSpeed = parseInt(value);
@@ -165,19 +166,35 @@
         }
     }
 
+    function toggleAutoDetect() {
+        const btn = document.getElementById('btn-auto');
+        
+        if (autoDetectInterval) {
+            clearInterval(autoDetectInterval);
+            autoDetectInterval = null;
+            btn.textContent = "🔄 Detect: OFF";
+            btn.style.backgroundColor = "#ff9800"; 
+            document.getElementById('analysis-status').textContent = "Đã dừng tự động.";
+        } else {
+            runAnalysisTest();
+            autoDetectInterval = setInterval(runAnalysisTest, 1000);
+            
+            btn.textContent = "🔄 Detect: ON";
+            btn.style.backgroundColor = "#2196F3"; 
+        }
+    }
+
     async function runAnalysisTest() {
         const analysisDiv = document.getElementById('analysis-status');
-        analysisDiv.textContent = "Đang test, vui lòng chờ 2-3s...";
-        analysisDiv.style.backgroundColor = "#ffeb3b"; // Màu vàng đậm
+        
+        if (!autoDetectInterval) {
+             analysisDiv.textContent = "Đang gửi yêu cầu...";
+        }
 
         try {
             const response = await fetch('/api/analyze-stream/');
-
-            console.log("Đã gửi yêu cầu test phân tích.");
-
         } catch (error) {
-            console.error('Lỗi khi test phân tích:', error);
-            analysisDiv.textContent = 'Lỗi: Không thể chạy test.';
+            console.error('Lỗi khi gọi phân tích:', error);
         }
     }
 
@@ -209,10 +226,10 @@
                 break;
         }
     });
-    const esp32IP = prompt("Nhập IP của ESP32-CAM:");
-    if (esp32IP) {
-        document.getElementById('camera-stream').src = esp32IP;
-    }
+    // const esp32IP = prompt("Nhập IP của ESP32-CAM:");
+    // if (esp32IP) {
+    //     document.getElementById('camera-stream').src = esp32IP;
+    // }
 
     function updateAnalysisDisplay(data) {
         const analysisDiv = document.getElementById('analysis-status');
