@@ -11,8 +11,8 @@ class ControlConfig(AppConfig):
         # Code này sẽ CHỈ chạy trong quy trình con (worker)
         if os.environ.get('RUN_MAIN') == 'true':
             # Import ở đây để tránh lỗi
-            # from .stream_manager import stream_manager
+            from .stream_manager import stream_manager
             print("Khởi động Stream Manager (Chỉ trong process worker)...")
-            # stream_manager.start()
+            stream_manager.start()
         else:
             print("Bỏ qua khởi động Stream Manager (Trong process reloader)...")

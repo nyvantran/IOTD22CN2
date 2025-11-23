@@ -27,7 +27,7 @@ class StreamManager:
 
     def _capture_loop(self):
         """Vòng lặp chạy trong thread để lấy và giải mã frame."""
-        print(f"Bắt đầu thread lấy stream từ: {self.url}")
+        print(f"Bắt đầu thread lấy stream từ: {self.url}  ")
         try:
             self.cap = cv2.VideoCapture(self.url)
             if not self.cap.isOpened():
@@ -77,5 +77,8 @@ class StreamManager:
 
 
 # Tạo một instance duy nhất (singleton) để toàn bộ ứng dụng sử dụng
-URL_STREAM = "http://192.168.0.106/stream"
+URL_STREAM = "http://192.168.1.18/stream"
 stream_manager = StreamManager(url=URL_STREAM)
+# stream_manager.start()
+# cv2.imwrite("test.jpg", stream_manager.get_latest_frame())
+# stream_manager.stop()

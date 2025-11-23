@@ -1,16 +1,14 @@
 import cv2
 import numpy as np
 import sys
-import json
 
 
+# ==============================================================================
+# LỚP TRỢ GIÚP CẤU HÌNH (Không thay đổi)
+# ==============================================================================
 class ConfigHelper:
     """
     Lớp trợ giúp để cấu hình các điểm trên một hình ảnh bằng cách nhấp chuột.
-    - Nhấp chuột trái để chọn một điểm.
-    - Nhấn 'r' để đặt lại (reset) các điểm đã chọn.
-    - Nhấn 'q' để thoát mà không lưu.
-    Khi đủ số điểm được chọn, cửa sổ sẽ tự động đóng.
     """
 
     def __init__(self, image, num_points, window_name="Config Helper"):
@@ -25,17 +23,12 @@ class ConfigHelper:
         if event == cv2.EVENT_LBUTTONDOWN:
             if len(self.points) < self.num_points:
                 self.points.append((x, y))
-                # Vẽ điểm và số thứ tự lên ảnh
                 cv2.circle(self.display_image, (x, y), 5, (0, 255, 0), -1)
                 cv2.putText(self.display_image, str(len(self.points)), (x + 10, y - 10),
                             self.font, 0.7, (0, 0, 255), 2)
                 cv2.imshow(self.window_name, self.display_image)
 
     def get_points(self):
-        """
-        Hiển thị cửa sổ và thu thập các điểm từ người dùng.
-        Trả về danh sách các điểm hoặc None nếu người dùng thoát.
-        """
         cv2.namedWindow(self.window_name)
         cv2.imshow(self.window_name, self.display_image)
         cv2.setMouseCallback(self.window_name, self._mouse_callback)
@@ -45,18 +38,15 @@ class ConfigHelper:
 
         while True:
             key = cv2.waitKey(1) & 0xFF
-
             if key == ord('q'):
                 print("Đã hủy cấu hình.")
                 cv2.destroyWindow(self.window_name)
                 return None
-
             if key == ord('r'):
                 print("Đặt lại các điểm. Vui lòng chọn lại.")
                 self.points = []
                 self.display_image = self.image.copy()
                 cv2.imshow(self.window_name, self.display_image)
-
             if len(self.points) == self.num_points:
                 print(f"Đã chọn đủ {self.num_points} điểm.")
                 break
@@ -64,33 +54,16 @@ class ConfigHelper:
         cv2.destroyWindow(self.window_name)
         return self.points
 
-    def save_config(self, filename, **kargs):
-        """ Lưu cấu hình điểm vào file """
-        with open(filename, 'w') as f:
-            json.dump(kargs, f, indent=4)
 
-        print(f"Cấu hình đã được lưu vào '{filename}'.")
-
-    def load_config(self, filename):
-        """ Tải cấu hình điểm từ file """
-        with open(filename, 'r') as f:
-            config = json.load(f)
-        print(f"Cấu hình đã được tải từ '{filename}'.")
-        return config
-
-
+# ==============================================================================
+# LỚP LANE DETECTOR HOÀN CHỈNH
+# ==============================================================================
 class LaneDetector:
     """
     Lớp phát hiện làn đường, tính toán độ cong và đưa ra gợi ý lái xe.
     """
 
     def __init__(self, roi_poly, warp_src_pts, warp_dst_size=(400, 960)):
-        """
-        Khởi tạo đối tượng LaneDetector.
-        :param roi_poly: Danh sách các điểm (polygon) xác định vùng quan tâm (ROI).
-        :param warp_src_pts: 4 điểm nguồn cho phép biến đổi phối cảnh.
-        :param warp_dst_size: Tuple (width, height) của hình ảnh đích sau khi biến đổi.
-        """
         self.roi_poly = np.array([roi_poly], dtype=np.int32)
         self.warp_src = np.float32(warp_src_pts)
         self.warp_dst_width, self.warp_dst_height = warp_dst_size
@@ -102,146 +75,167 @@ class LaneDetector:
             [self.warp_dst_width, self.warp_dst_height]
         ])
 
-        # Tính toán ma trận biến đổi phối cảnh một lần
         self.M = cv2.getPerspectiveTransform(self.warp_src, self.warp_dst)
         self.Minv = cv2.getPerspectiveTransform(self.warp_dst, self.warp_src)
 
-        # Tham số cho việc tìm làn
         self.nwindows = 50
         self.margin = 100
         self.minpix = 50
 
-        # Các biến để lưu trữ kết quả của khung hình trước (cho sự ổn định)
         self.left_fit = None
         self.right_fit = None
 
     def _preprocess(self, img):
-        """ Tiền xử lý ảnh để phát hiện làn màu vàng và trắng """
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        """
+        Tiền xử lý ảnh để chỉ phát hiện làn đường màu trắng, hoạt động tốt trong
+        các điều kiện ánh sáng khác nhau.
+        """
+        hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
+        L_channel = hls[:, :, 1]
 
-        # Làn trắng
-        gblur = cv2.GaussianBlur(gray, (5, 5), 0)
-        white_mask = cv2.threshold(gblur, 200, 255, cv2.THRESH_BINARY)[1]
+        L_channel_blurred = cv2.GaussianBlur(L_channel, (5, 5), 0)
 
-        # Làn vàng
-        lower_yellow = np.array([15, 100, 100])
-        upper_yellow = np.array([30, 255, 255])
-        yellow_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+        white_mask = cv2.adaptiveThreshold(L_channel_blurred, 255,
+                                           cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                           cv2.THRESH_BINARY, 15, -2)
 
-        mask = cv2.bitwise_or(white_mask, yellow_mask)
-        return mask
+        kernel = np.ones((3, 3), np.uint8)
+        final_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel)
+
+        return final_mask
 
     def _region_of_interest(self, img):
-        """ Áp dụng mặt nạ vùng quan tâm (ROI) """
         mask = np.zeros_like(img)
         cv2.fillPoly(mask, self.roi_poly, 255)
         masked_img = cv2.bitwise_and(img, mask)
         return masked_img
 
-    def _warp(self, img):
-        """ Biến đổi phối cảnh (bird's-eye view) """
-        return cv2.warpPerspective(img, self.M, (self.warp_dst_width, self.warp_dst_height))
+    def _fit_curve(self, binary_img, M):
+        """
+        Tìm các điểm pixel của làn đường trên ảnh gốc, warp các điểm này sang không gian BEV,
+        và sau đó khớp đa thức.
+        """
+        y_coords, x_coords = binary_img.nonzero()
 
-    def _unwarp(self, img, src_size):
-        """ Biến đổi phối cảnh ngược lại """
-        return cv2.warpPerspective(img, self.Minv, src_size)
+        if len(x_coords) == 0:
+            return self.left_fit, self.right_fit, None, None
 
-    def _fit_curve(self, warped_img):
-        """ Tìm và khớp đa thức cho các vạch làn đường """
-        histogram = np.sum(warped_img[warped_img.shape[0] // 2:, :], axis=0)
-        midpoint = int(histogram.shape[0] / 2)
-        leftx_base = np.argmax(histogram[:midpoint])
-        rightx_base = np.argmax(histogram[midpoint:]) + midpoint
+        pts = np.float32(np.column_stack((x_coords, y_coords))).reshape(-1, 1, 2)
+        warped_pts = cv2.perspectiveTransform(pts, M)
 
-        window_height = int(warped_img.shape[0] / self.nwindows)
-        y, x = warped_img.nonzero()
-        leftx_current = leftx_base
-        rightx_current = rightx_base
+        warped_x = warped_pts[:, 0, 0]
+        warped_y = warped_pts[:, 0, 1]
+
+        # Lọc ra các điểm nằm ngoài ranh giới của ảnh BEV để tránh lỗi IndexError
+        valid_indices = (warped_x >= 0) & (warped_x < self.warp_dst_width) & \
+                        (warped_y >= 0) & (warped_y < self.warp_dst_height)
+
+        warped_x = warped_x[valid_indices]
+        warped_y = warped_y[valid_indices]
+
+        if len(warped_x) == 0:
+            return self.left_fit, self.right_fit, None, None
+
+        # Sliding Window trên không gian BEV
+        warped_midpoint = self.warp_dst_width / 2
+        leftx_base_candidates = warped_x[warped_x < warped_midpoint]
+        rightx_base_candidates = warped_x[warped_x >= warped_midpoint]
+
+        if len(leftx_base_candidates) == 0 or len(rightx_base_candidates) == 0:
+            return self.left_fit, self.right_fit, None, None
+
+        leftx_current = np.mean(leftx_base_candidates)
+        rightx_current = np.mean(rightx_base_candidates)
 
         left_lane_indices = []
         right_lane_indices = []
 
+        window_height = int(self.warp_dst_height / self.nwindows)
+
         for window in range(self.nwindows):
-            win_y_low = warped_img.shape[0] - (window + 1) * window_height
-            win_y_high = warped_img.shape[0] - window * window_height
+            win_y_low = self.warp_dst_height - (window + 1) * window_height
+            win_y_high = self.warp_dst_height - window * window_height
+
             win_xleft_low = leftx_current - self.margin
             win_xleft_high = leftx_current + self.margin
             win_xright_low = rightx_current - self.margin
             win_xright_high = rightx_current + self.margin
 
-            good_left_indices = \
-                ((y >= win_y_low) & (y < win_y_high) & (x >= win_xleft_low) & (x < win_xleft_high)).nonzero()[0]
-            good_right_indices = \
-                ((y >= win_y_low) & (y < win_y_high) & (x >= win_xright_low) & (x < win_xright_high)).nonzero()[0]
+            good_left_inds = ((warped_y >= win_y_low) & (warped_y < win_y_high) &
+                              (warped_x >= win_xleft_low) & (warped_x < win_xleft_high)).nonzero()[0]
+            good_right_inds = ((warped_y >= win_y_low) & (warped_y < win_y_high) &
+                               (warped_x >= win_xright_low) & (warped_x < win_xright_high)).nonzero()[0]
 
-            left_lane_indices.append(good_left_indices)
-            right_lane_indices.append(good_right_indices)
+            left_lane_indices.append(good_left_inds)
+            right_lane_indices.append(good_right_inds)
 
-            if len(good_left_indices) > self.minpix:
-                leftx_current = int(np.mean(x[good_left_indices]))
-            if len(good_right_indices) > self.minpix:
-                rightx_current = int(np.mean(x[good_right_indices]))
+            if len(good_left_inds) > self.minpix:
+                leftx_current = int(np.mean(warped_x[good_left_inds]))
+            if len(good_right_inds) > self.minpix:
+                rightx_current = int(np.mean(warped_x[good_right_inds]))
+
+        if not any(map(len, left_lane_indices)) or not any(map(len, right_lane_indices)):
+            return self.left_fit, self.right_fit, None, None
 
         left_lane_indices = np.concatenate(left_lane_indices)
         right_lane_indices = np.concatenate(right_lane_indices)
 
-        leftx, lefty = x[left_lane_indices], y[left_lane_indices]
-        rightx, righty = x[right_lane_indices], y[right_lane_indices]
+        leftx, lefty = warped_x[left_lane_indices], warped_y[left_lane_indices]
+        rightx, righty = warped_x[right_lane_indices], warped_y[right_lane_indices]
 
-        # Chỉ khớp đa thức nếu tìm thấy đủ điểm
         if len(leftx) > 0 and len(rightx) > 0:
             left_fit = np.polyfit(lefty, leftx, 2)
             right_fit = np.polyfit(righty, rightx, 2)
             self.left_fit = left_fit
             self.right_fit = right_fit
 
-        return self.left_fit, self.right_fit
+        return self.left_fit, self.right_fit, (leftx, lefty), (rightx, righty)
 
-    def _draw_lane_area(self, original_img, warped_img, left_fit, right_fit):
-        """ Vẽ vùng làn đường lên ảnh gốc """
+    def _draw_lane_area(self, original_img, left_fit, right_fit, Minv):
+        """
+        Tạo các đường cong trong không gian BEV, unwarp chúng về ảnh gốc và vẽ vùng làn đường.
+        """
         if left_fit is None or right_fit is None:
             return original_img
 
-        ploty = np.linspace(0, warped_img.shape[0] - 1, warped_img.shape[0])
+        ploty = np.linspace(0, self.warp_dst_height - 1, self.warp_dst_height)
         left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
         right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
 
-        # Tạo ảnh để vẽ các làn đường
-        warp_zero = np.zeros_like(warped_img).astype(np.uint8)
-        color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
-
-        # Vẽ vùng giữa hai làn
         pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
         pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
-        pts = np.hstack((pts_left, pts_right))
-        cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
 
-        # Biến đổi ngược lại và kết hợp với ảnh gốc
-        new_warp = self._unwarp(color_warp, (original_img.shape[1], original_img.shape[0]))
-        result = cv2.addWeighted(original_img, 1, new_warp, 0.3, 0)
+        unwarped_pts_left = cv2.perspectiveTransform(pts_left, Minv)
+        unwarped_pts_right = cv2.perspectiveTransform(pts_right, Minv)
+
+        pts = np.hstack((unwarped_pts_left, unwarped_pts_right))
+
+        overlay = np.zeros_like(original_img)
+        cv2.fillPoly(overlay, np.int_([pts]), (0, 255, 0))
+
+        result = cv2.addWeighted(original_img, 1, overlay, 0.3, 0)
+
+        cv2.polylines(result, np.int32([unwarped_pts_left]), isClosed=False, color=(255, 0, 0), thickness=10)
+        cv2.polylines(result, np.int32([unwarped_pts_right]), isClosed=False, color=(0, 0, 255), thickness=10)
+
         return result
 
-    def _calculate_curvature_and_offset(self, img_shape, left_fit, right_fit):
-        """ Tính toán độ cong và độ lệch so với tâm làn đường """
+    def _calculate_curvature_and_offset(self, bev_shape, left_fit, right_fit):
         if left_fit is None or right_fit is None:
-            return 0, 0, 0, 0
+            return 0, 0
 
-        # Định nghĩa hệ số chuyển đổi từ pixel sang mét
-        ym_per_pix = 30 / 720  # mét trên mỗi pixel theo chiều y
-        xm_per_pix = 3.7 / 700  # mét trên mỗi pixel theo chiều x
+        ym_per_pix = 30 / 720
+        xm_per_pix = 3.7 / 700
 
-        ploty = np.linspace(0, img_shape[0] - 1, img_shape[0])
+        ploty = np.linspace(0, bev_shape[0] - 1, bev_shape[0])
         y_eval = np.max(ploty)
 
         leftx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
         rightx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
 
-        # Khớp đa thức mới trên hệ mét
         left_fit_cr = np.polyfit(ploty * ym_per_pix, leftx * xm_per_pix, 2)
         right_fit_cr = np.polyfit(ploty * ym_per_pix, rightx * xm_per_pix, 2)
 
-        # Tính bán kính độ cong
         left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
             2 * left_fit_cr[0])
         right_curverad = ((1 + (
@@ -250,25 +244,29 @@ class LaneDetector:
 
         avg_radius = (left_curverad + right_curverad) / 2
 
-        # Tính độ lệch của xe
         lane_center_pos = (leftx[-1] + rightx[-1]) / 2
-        car_center_pos = img_shape[1] / 2
+        car_center_pos = bev_shape[1] / 2
         offset = (car_center_pos - lane_center_pos) * xm_per_pix
 
-        return left_curverad, right_curverad, avg_radius, offset
+        return avg_radius, offset
 
     def _add_turn_info(self, img, radius, offset):
-        """ Thêm thông tin về độ cong và hướng rẽ lên ảnh """
-
-        if radius > 5000:
+        command = "straight"
+        if radius > 4000:  # Ngưỡng đi thẳng lớn hơn
             turn = "Di Thang"
-            command = "forward"
-        elif radius > 0:
+            command = "straight"
+        elif offset > 0.15:  # Lệch trái nhiều
+            turn = f"Re Phai Nhieu (R={int(radius)}m)"
+            command = "hard_right"
+        elif offset < -0.15:  # Lệch phải nhiều
+            turn = f"Re Trai Nhieu (R={int(abs(radius))}m)"
+            command = "hard_left"
+        elif radius > 0:  # Bán kính dương -> cua phải
             turn = f"Re Phai (R={int(radius)}m)"
-            command = "left"
-        else:
-            turn = f"Re Trai (R={int(abs(radius))}m)"
             command = "right"
+        else:  # Bán kính âm -> cua trái
+            turn = f"Re Trai (R={int(abs(radius))}m)"
+            command = "left"
 
         if abs(offset) < 0.1:
             pos_text = "Vi tri: Giua Lan"
@@ -281,105 +279,103 @@ class LaneDetector:
         cv2.putText(img, pos_text, (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
         return img, command
 
-    def process_frame(self, frame):
-        """
-        Phương thức chính xử lý một khung hình video.
-        :param frame: Khung hình đầu vào (BGR).
-        :return: Tuple (final_image, dashboard_image)
-        """
-        # 1. Tiền xử lý
-        processed_img = self._preprocess(frame)
+    def _create_dashboard(self, original, processed, masked, left_pts_bev, right_pts_bev):
+        h, w = 240, 320
 
-        # 2. Áp dụng ROI
-        masked_img = self._region_of_interest(processed_img)
-        # 3. Biến đổi phối cảnh
-        warped_img = self._warp(masked_img)
-
-        # 4. Tìm và khớp đường cong
-        left_fit, right_fit = self._fit_curve(warped_img)
-
-        # 5. Vẽ vùng làn đường
-        final_image = self._draw_lane_area(frame, warped_img, left_fit, right_fit)
-
-        # 6. Tính toán độ cong và độ lệch
-        l_rad, r_rad, avg_rad, offset = self._calculate_curvature_and_offset(warped_img.shape, left_fit, right_fit)
-
-        # 7. Thêm thông tin lên ảnh
-        final_image, command = self._add_turn_info(final_image, avg_rad, offset)
-
-        # 8. Tạo dashboard để gỡ lỗi
-        dashboard = self._create_dashboard(frame, processed_img, masked_img, warped_img)
-
-        return final_image, dashboard, command
-
-    def _create_dashboard(self, original, processed, masked, warped):
-        """ Tạo một hình ảnh tổng hợp các bước xử lý """
-        h, w = 240, 320  # Kích thước cho mỗi ảnh nhỏ
-
-        # Chuyển các ảnh 1 kênh sang 3 kênh để ghép
         processed_3ch = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
         masked_3ch = cv2.cvtColor(masked, cv2.COLOR_GRAY2BGR)
-        warped_3ch = cv2.cvtColor(warped, cv2.COLOR_GRAY2BGR)
 
-        # Thay đổi kích thước
+        bev_canvas = np.zeros((self.warp_dst_height, self.warp_dst_width, 3), dtype=np.uint8)
+        if left_pts_bev is not None and right_pts_bev is not None:
+            leftx_bev, lefty_bev = left_pts_bev
+            rightx_bev, righty_bev = right_pts_bev
+            if len(leftx_bev) > 0:
+                bev_canvas[lefty_bev.astype(int), leftx_bev.astype(int)] = [255, 0, 0]
+            if len(rightx_bev) > 0:
+                bev_canvas[righty_bev.astype(int), rightx_bev.astype(int)] = [0, 0, 255]
+
         original_small = cv2.resize(original, (w, h))
         processed_small = cv2.resize(processed_3ch, (w, h))
         masked_small = cv2.resize(masked_3ch, (w, h))
-        warped_small = cv2.resize(warped_3ch, (w, h))
+        bev_small = cv2.resize(bev_canvas, (w, h))
 
-        # Thêm tiêu đề cho mỗi ảnh
         cv2.putText(original_small, 'Original', (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(processed_small, 'Preprocessed', (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(processed_small, 'Preprocessed Mask', (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.putText(masked_small, 'ROI Masked', (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(warped_small, 'Warped', (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(bev_small, 'Warped Lane Points', (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        # Ghép các ảnh lại
         top_row = np.hstack((original_small, processed_small))
-        bottom_row = np.hstack((masked_small, warped_small))
+        bottom_row = np.hstack((masked_small, bev_small))
         dashboard = np.vstack((top_row, bottom_row))
 
         return dashboard
 
+    def process_frame(self, frame):
+        """
+        Phương thức chính xử lý một khung hình video.
+        """
+        processed_img = self._preprocess(frame)
+        masked_img = self._region_of_interest(processed_img)
 
+        left_fit, right_fit, left_pts_bev, right_pts_bev = self._fit_curve(masked_img, self.M)
+
+        bev_shape = (self.warp_dst_height, self.warp_dst_width)
+        avg_rad, offset = self._calculate_curvature_and_offset(bev_shape, left_fit, right_fit)
+
+        final_image = self._draw_lane_area(frame, left_fit, right_fit, self.Minv)
+        final_image, command = self._add_turn_info(final_image, avg_rad, offset)
+
+        dashboard = self._create_dashboard(frame, processed_img, masked_img, left_pts_bev, right_pts_bev)
+
+        return final_image, dashboard, command
+
+
+# ==============================================================================
+# CHƯƠNG TRÌNH CHÍNH ĐỂ CHẠY
+# ==============================================================================
 def main():
     from stream_manager import stream_manager
     stream_manager.start()
-    fist_frame = stream_manager.latest_frame
-    # fist_frame = cv2.imread(r"D:\Project\IOT\IOTD22CN2\0.jpg")
-    config_helper = ConfigHelper(fist_frame, 4)
-    roi_point = config_helper.get_points()
-    warp_helper = ConfigHelper(fist_frame, 4, window_name="Warp Point Configuration")
-    warp_point = warp_helper.get_points()
-    print("nhập (width, height) của hình ảnh đích")
-    width = int(input("width: "))
-    height = int(input("hegiht: "))
-    config_path = "lane_detection.json"
+    first_frame = stream_manager.get_latest_frame()
 
-    config_helper.save_config(config_path, roi_point=roi_point, warp_point=warp_point, warp_dst_size=(width, height))
+    frame_h, frame_w = first_frame.shape[:2]
 
+    # ----- CẤU HÌNH TƯƠNG TÁC -----
+    print("--- BẮT ĐẦU CẤU HÌNH ---")
+    roi_helper = ConfigHelper(first_frame, 4, "Cau hinh ROI")
+    print("Thu tu goi y cho ROI: duoi-trai -> tren-trai -> tren-phai -> duoi-phai")
+    roi_points = roi_helper.get_points()
+    if roi_points is None: sys.exit()
 
-def main1():
-    config_path = "lane_detection.json"
-    config = ConfigHelper(np.array([0]), 4).load_config(config_path)
+    frame_with_roi = first_frame.copy()
+    cv2.polylines(frame_with_roi, [np.array(roi_points, np.int32)], isClosed=True, color=(0, 255, 255), thickness=2)
+    warp_helper = ConfigHelper(frame_with_roi, 4, "Cau hinh Warp")
+    print("\nThu tu goi y cho diem Warp: tren-trai -> tren-phai -> duoi-trai -> duoi-phai")
+    warp_points = warp_helper.get_points()
+    if warp_points is None: sys.exit()
 
-    lane_detector = LaneDetector(roi_poly=config["roi_point"], warp_src_pts=config["warp_point"],
-                                 warp_dst_size=config["warp_dst_size"])
-    from stream_manager import stream_manager
-    stream_manager.start()
+    print("\n--- CẤU HÌNH HOÀN TẤT ---")
+    print(f"Cac diem ROI da chon: {roi_points}")
+    print(f"Cac diem Warp da chon: {warp_points}")
 
+    # ----- KHỞI TẠO VÀ XỬ LÝ VIDEO -----
+    detector = LaneDetector(roi_poly=roi_points, warp_src_pts=warp_points, warp_dst_size=(400, 960))
+
+    print("\nDang xu ly video... Nhan 'q' de dung lai.")
     while True:
         frame = stream_manager.get_latest_frame()
-        if frame is not None:
-            final_image, dashboard, command = lane_detector.process_frame(frame)
 
-            cv2.imshow("Lane Detection", final_image)
-            cv2.imshow("Dashboard", dashboard)
+        final_result, dashboard, command = detector.process_frame(frame)
+        print(f"Command: {command}")  # In ra lệnh điều khiển
+
+        cv2.imshow("Ket qua Phat hien Lan duong", final_result)
+        cv2.imshow("Dashboard", dashboard)
+
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
+    cv2.destroyAllWindows()
 
-# --- CHƯƠNG TRÌNH CHÍNH ---
+
 if __name__ == "__main__":
-    # main()
-    main1()
-    pass
+    main()
