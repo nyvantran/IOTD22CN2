@@ -111,6 +111,9 @@
         <button class="empty"></button>
         <button onclick="sendCommand('backward')">⬇️ Lùi</button>
         <button class="empty"></button>
+        
+        <button id="btn-auto" style="background-color: #ff9800;" onclick="toggleAutoDetect()">🔄 Detect: OFF</button>
+
     </div>
 
     <div class="speed-control">
@@ -130,6 +133,7 @@
 
 <script>
     let currentSpeed = 150;
+    let autoDetectInterval = null;  
 
     function updateSpeed(value) {
         currentSpeed = parseInt(value);
@@ -162,6 +166,38 @@
         }
     }
 
+    function toggleAutoDetect() {
+        const btn = document.getElementById('btn-auto');
+        
+        if (autoDetectInterval) {
+            clearInterval(autoDetectInterval);
+            autoDetectInterval = null;
+            btn.textContent = "🔄 Detect: OFF";
+            btn.style.backgroundColor = "#ff9800"; 
+            document.getElementById('analysis-status').textContent = "Đã dừng tự động.";
+        } else {
+            runAnalysisTest();
+            autoDetectInterval = setInterval(runAnalysisTest, 1000);
+            
+            btn.textContent = "🔄 Detect: ON";
+            btn.style.backgroundColor = "#2196F3"; 
+        }
+    }
+
+    async function runAnalysisTest() {
+        const analysisDiv = document.getElementById('analysis-status');
+        
+        if (!autoDetectInterval) {
+             analysisDiv.textContent = "Đang gửi yêu cầu...";
+        }
+
+        try {
+            const response = await fetch('/api/analyze-stream/');
+        } catch (error) {
+            console.error('Lỗi khi gọi phân tích:', error);
+        }
+    }
+
     // Điều khiển bằng bàn phím
     document.addEventListener('keydown', (event) => {
         switch (event.key) {
@@ -190,10 +226,10 @@
                 break;
         }
     });
-    const esp32IP = prompt("Nhập IP của ESP32-CAM:");
-    if (esp32IP) {
-        document.getElementById('camera-stream').src = esp32IP;
-    }
+    // const esp32IP = prompt("Nhập IP của ESP32-CAM:");
+    // if (esp32IP) {
+    //     document.getElementById('camera-stream').src = esp32IP;
+    // }
 
     function updateAnalysisDisplay(data) {
         const analysisDiv = document.getElementById('analysis-status');
@@ -228,7 +264,7 @@
         }
     }
 
-    setInterval(fetchAnalysisResult, 2000);
+    setInterval(fetchAnalysisResult, 1000);
 </script>
 </body>
 </html>
