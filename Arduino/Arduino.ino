@@ -253,10 +253,10 @@ void loop() {
 
 // Kickstart Motor functions
 void kickStart(int speed) {
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
+  // digitalWrite(IN1, HIGH);
+  // digitalWrite(IN2, LOW);
+  // digitalWrite(IN3, LOW);
+  // digitalWrite(IN4, HIGH);
   ledcWrite(ENA, speed);
   ledcWrite(ENB, speed);
   delay(kickstarttime);
@@ -265,22 +265,24 @@ void kickStart(int speed) {
 
 // Motor control functions
 void turnRight(int speed) {
+  int boot = speed / 5;
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-  ledcWrite(ENA, speed + 50);
-  ledcWrite(ENB, speed - 25);
+  ledcWrite(ENA, speed + 20);
+  ledcWrite(ENB, 100 + boot);
   // Serial.printf("Forward at speed %d\n", speed);
 }
 
 void turnLeft(int speed) {
+  int boot = speed / 5;
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-  ledcWrite(ENA, speed - 25);
-  ledcWrite(ENB, speed + 50);
+  ledcWrite(ENA, 100 + boot);
+  ledcWrite(ENB, speed + 20);
   // Serial.printf("Backward at speed %d\n", speed);
 }
 

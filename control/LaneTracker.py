@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import json
 
 
 class LaneNavigator:
@@ -13,6 +14,28 @@ class LaneNavigator:
         # Thông số kỹ thuật (giả định camera ô tô chuẩn)
         self.ym_per_pix = 30 / 720  # mét trên pixel theo chiều dọc
         self.xm_per_pix = 3.7 / 700  # mét trên pixel theo chiều ngang (làn đường chuẩn rộng 3.7m)
+
+    def load_config(self, filepath="lane_nav_config.json"):
+        with open(filepath, "r") as f:
+            data = json.load(f)
+            self.roi_points = data["roi_points"]
+            self.bev_src_points = np.array(data["bev_src_points"], dtype=np.float32)
+            self.bev_dst_points = np.array(data["bev_dst_points"], dtype=np.float32)
+            self.M = np.array(data["M"], dtype=np.float32)
+            self.Minv = np.array(data["Minv"], dtype=np.float32)
+        print("Cấu hình đã được tải từ lane_nav_config.json")
+
+    def save_config(self):
+        json_str = json.dumps({
+            "roi_points": self.roi_points,
+            "bev_src_points": self.bev_src_points.tolist(),
+            "bev_dst_points": self.bev_dst_points.tolist(),
+            "M": self.M.tolist(),
+            "Minv": self.Minv.tolist()
+        })
+        with open("lane_nav_config.json", "w") as f:
+            f.write(json_str)
+        print("Cấu hình đã được lưu vào lane_nav_config.json")
 
     def select_points_interactive(self, frame):
         """
@@ -62,6 +85,7 @@ class LaneNavigator:
         self.M = cv2.getPerspectiveTransform(self.bev_src_points, self.bev_dst_points)
         self.Minv = cv2.getPerspectiveTransform(self.bev_dst_points, self.bev_src_points)
         print("Cấu hình hoàn tất.")
+        self.save_config()
 
     def preprocess_advanced(self, img):
         """
@@ -262,6 +286,7 @@ if __name__ == "__main__":
     first_frame = stream_manager.get_latest_frame()
 
     lane_nav.select_points_interactive(first_frame)
+    lane_nav.load_config("lane_nav_config.json")
 
     # Setup Video Writer (nếu muốn lưu)
 
@@ -286,6 +311,5 @@ if __name__ == "__main__":
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-
 
     cv2.destroyAllWindows()
