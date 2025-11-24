@@ -77,8 +77,8 @@ def analyze_stream_once(request):
             status=500
         )
 
-    stream_manager.start()
-    frame = None
+    # stream_manager.start()
+    # frame = None
     try:
         frame = stream_manager.get_latest_frame()
 
