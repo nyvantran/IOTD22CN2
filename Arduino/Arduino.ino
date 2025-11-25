@@ -5,9 +5,9 @@
 #include <WebServer.h>
 
 // Cấu hình WiFi
-const char* ssid = "Nha Tro Hanh Phuc_5G";
-const char* password = "13681368";
-const char* serverUrl = "http://192.168.1.11:8000/api/command/";
+const char* ssid = "PTIT.HCM_SV";
+const char* password = "";
+const char* serverUrl = "http://10.251.11.226:8000/api/command/";
 
 // Cấu hình speed
 const int kickstartspeed = 150;
