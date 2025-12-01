@@ -7,12 +7,12 @@
 // Cấu hình WiFi
 const char* ssid = "PTIT.HCM_SV";
 const char* password = "";
-const char* serverUrl = "http://10.251.11.226:8000/api/command/";
+const char* serverUrl = "http://10.251.6.158:8000/api/command/";
 
 // Cấu hình speed
 const int kickstartspeed = 150;
 const int maxspeed = 255;
-const int kickstarttime = 300;
+const int kickstarttime = 150;
 
 // chế độ hiện tại
 const char* currenttask = "stop";
@@ -253,10 +253,10 @@ void loop() {
 
 // Kickstart Motor functions
 void kickStart(int speed) {
-  // digitalWrite(IN1, HIGH);
-  // digitalWrite(IN2, LOW);
-  // digitalWrite(IN3, LOW);
-  // digitalWrite(IN4, HIGH);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
   ledcWrite(ENA, speed);
   ledcWrite(ENB, speed);
   delay(kickstarttime);
@@ -265,24 +265,24 @@ void kickStart(int speed) {
 
 // Motor control functions
 void turnRight(int speed) {
-  int boot = speed / 5;
+  int boot = (maxspeed - speed) / 5;
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-  ledcWrite(ENA, speed + 20);
-  ledcWrite(ENB, 100 + boot);
+  ledcWrite(ENA, speed + 15);
+  ledcWrite(ENB, 100);
   // Serial.printf("Forward at speed %d\n", speed);
 }
 
 void turnLeft(int speed) {
-  int boot = speed / 5;
+  int boot = (maxspeed - speed) / 5;
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-  ledcWrite(ENA, 100 + boot);
-  ledcWrite(ENB, speed + 20);
+  ledcWrite(ENA, 100);
+  ledcWrite(ENB, speed + 15);
   // Serial.printf("Backward at speed %d\n", speed);
 }
 

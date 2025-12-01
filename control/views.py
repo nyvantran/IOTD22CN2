@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from .models import Command
 from .models import Command, DetectionResult
 from .stream_manager import stream_manager
+from .car_control import car_control
 import json
 import base64
 import time

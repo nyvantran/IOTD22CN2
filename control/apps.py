@@ -12,7 +12,9 @@ class ControlConfig(AppConfig):
         if os.environ.get('RUN_MAIN') == 'true':
             # Import ở đây để tránh lỗi
             from .stream_manager import stream_manager
+            from .car_control import car_control
             print("Khởi động Stream Manager (Chỉ trong process worker)...")
             stream_manager.start()
+            car_control.start()
         else:
             print("Bỏ qua khởi động Stream Manager (Trong process reloader)...")
