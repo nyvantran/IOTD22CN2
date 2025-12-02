@@ -904,4 +904,4 @@ if __name__ == "__main__":
     main()
 
 lane_nav = LaneNavigator()
-lane_nav.load_config("lane_nav_config.json")
+lane_nav.load_config("control/lane_nav_config.json")

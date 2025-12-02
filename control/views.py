@@ -36,6 +36,9 @@ def index(request):
 @api_view(['GET'])
 def get_command(request):
     """API endpoint để ESP32 lấy lệnh"""
+    cmd, speed = car_control.get_command()
+    # global current_command
+    current_command = {'command': cmd, 'speed': speed}
     return Response(current_command)
 
 
@@ -46,13 +49,17 @@ def set_command(request):
     global current_command
 
     command = request.data.get('command', 'stop')
-    speed = request.data.get('speed', 150)
+    speed = request.data.get('speed', 110)
 
     # Lưu lệnh vào database (optional)
     Command.objects.create(command=command, speed=speed)
-
+    car_control.set_speed(speed)
     # Cập nhật lệnh hiện tại
     current_command = {'command': command, 'speed': speed}
+    if command == 'stop':
+        car_control.pause()
+    if command == 'forward':
+        car_control.resume()
 
     return Response({'status': 'success', 'command': command, 'speed': speed})
 

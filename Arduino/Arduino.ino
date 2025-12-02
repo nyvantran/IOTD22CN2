@@ -7,23 +7,23 @@
 // Cấu hình WiFi
 const char* ssid = "PTIT.HCM_SV";
 const char* password = "";
-const char* serverUrl = "http://10.251.6.158:8000/api/command/";
+const char* serverUrl = "http://10.251.14.245:8000/api/command/";
 
 // Cấu hình speed
-const int kickstartspeed = 150;
+const int kickstartspeed = 200;
 const int maxspeed = 255;
-const int kickstarttime = 150;
+const int kickstarttime = 120;
 
 // chế độ hiện tại
 const char* currenttask = "stop";
 
 // Motor pins
-#define ENA 19
-#define IN1 20
-#define IN2 21
-#define ENB 41
-#define IN3 42
-#define IN4 45
+#define ENA 46  // PWM Động cơ A (GPIO46)
+#define IN1 38  // Động cơ A (GPIO38)
+#define IN2 39  // Động cơ A (GPIO39)
+#define ENB 40  // PWM Động cơ B (GPIO40)
+#define IN3 41  // Động cơ B (GPIO41)
+#define IN4 42  // Động cơ B (GPIO42)
 
 // Camera pins cho ESP32-S3-CAM
 #define PWDN_GPIO_NUM -1
@@ -50,7 +50,7 @@ TaskHandle_t cameraTaskHandle;
 TaskHandle_t motorTaskHandle;
 
 // Shared variables
-volatile int currentSpeed = 150;
+volatile int currentSpeed = 110;
 volatile bool motorTaskRunning = false;
 
 // PWM Configuration - đổi tên biến để tránh xung đột
@@ -124,8 +124,13 @@ void motorTask(void* parameter) {
           currentSpeed = speed;
 
           // Execute command directly in this task
-          if (strcmp(command, currenttask) != 0 and strcmp(command, "stop") != 0 and strcmp(currenttask, "stop") == 0) {
-            kickStart(maxspeed);
+          if (strcmp(command, currenttask) != 0 and strcmp(command, "stop") != 0 and (
+            strcmp(currenttask, "stop") == 0 
+                      // or strcmp(currenttask, "left") == 0 or strcmp(currenttask, "right") == 0
+          )
+          ) {
+
+            kickStart(kickstartspeed);
           }
           if (strcmp(command, "forward") == 0) {
             currenttask = "forward";
@@ -265,25 +270,23 @@ void kickStart(int speed) {
 
 // Motor control functions
 void turnRight(int speed) {
-  int boot = (maxspeed - speed) / 5;
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
-  ledcWrite(ENA, speed + 15);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+  ledcWrite(ENA, speed + 80);
   ledcWrite(ENB, 100);
-  // Serial.printf("Forward at speed %d\n", speed);
+  delay(100);
 }
 
 void turnLeft(int speed) {
-  int boot = (maxspeed - speed) / 5;
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
   ledcWrite(ENA, 100);
-  ledcWrite(ENB, speed + 15);
-  // Serial.printf("Backward at speed %d\n", speed);
+  ledcWrite(ENB, speed + 80);
+  delay(100);
 }
 
 void moveBackward(int speed) {

@@ -77,7 +77,7 @@ class StreamManager:
 
 
 # Tạo một instance duy nhất (singleton) để toàn bộ ứng dụng sử dụng
-URL_STREAM = "http://10.251.6.171/stream"
+URL_STREAM = "http://10.251.15.4/stream"
 stream_manager = StreamManager(url=URL_STREAM)
 # stream_manager.start()
 # cv2.imwrite("test.jpg", stream_manager.get_latest_frame())
