@@ -20,7 +20,7 @@ class LaneNavigator:
         self.k_angle = 0.8
         self.k_curvature = 0.5
 
-        self.steering_threshold = 0.15
+        self.steering_threshold = 0.2
         self.sharp_turn_threshold = 0.5
 
         self.prev_steering_score = 0

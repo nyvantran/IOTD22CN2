@@ -7,7 +7,7 @@
 // Cấu hình WiFi
 const char* ssid = "PTIT.HCM_SV";
 const char* password = "";
-const char* serverUrl = "http://10.251.14.245:8000/api/command/";
+const char* serverUrl = "http://10.251.9.88:8000/api/command/";
 
 // Cấu hình speed
 const int kickstartspeed = 200;
@@ -274,9 +274,8 @@ void turnRight(int speed) {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
-  ledcWrite(ENA, speed + 80);
+  ledcWrite(ENA, speed + 85);
   ledcWrite(ENB, 100);
-  delay(100);
 }
 
 void turnLeft(int speed) {
@@ -285,8 +284,7 @@ void turnLeft(int speed) {
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
   ledcWrite(ENA, 100);
-  ledcWrite(ENB, speed + 80);
-  delay(100);
+  ledcWrite(ENB, speed + 85);  
 }
 
 void moveBackward(int speed) {

@@ -64,7 +64,7 @@ class CarControl:
         self._command_before_pause = Command.STOP
 
         # Thông số điều khiển
-        self.steering_threshold_soft = 0.1
+        self.steering_threshold_soft = 0.2
         self.steering_threshold_hard = 0.4
         self.lost_lane_timeout = 1.0
         self._last_valid_detection_time = 0
