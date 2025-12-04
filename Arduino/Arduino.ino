@@ -7,7 +7,7 @@
 // Cấu hình WiFi
 const char* ssid = "PTIT.HCM_SV";
 const char* password = "";
-const char* serverUrl = "http://10.251.9.88:8000/api/command/";
+const char* serverUrl = "http://10.251.1.188:8000/api/command/";
 
 // Cấu hình speed
 const int kickstartspeed = 200;
@@ -124,11 +124,9 @@ void motorTask(void* parameter) {
           currentSpeed = speed;
 
           // Execute command directly in this task
-          if (strcmp(command, currenttask) != 0 and strcmp(command, "stop") != 0 and (
-            strcmp(currenttask, "stop") == 0 
-                      // or strcmp(currenttask, "left") == 0 or strcmp(currenttask, "right") == 0
-          )
-          ) {
+          if (strcmp(command, currenttask) != 0 and strcmp(command, "stop") != 0 and (strcmp(currenttask, "stop") == 0
+                                                                                      // or strcmp(currenttask, "left") == 0 or strcmp(currenttask, "right") == 0
+                                                                                      )) {
 
             kickStart(kickstartspeed);
           }
@@ -166,7 +164,7 @@ void handleStream() {
   response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
   client.print(response);
 
-  const int64_t frameInterval = 100000;  // 100ms = 10 FPS
+  const int64_t frameInterval = 150000;  // 100ms = 10 FPS
   int64_t lastFrameTime = 0;
 
   while (client.connected()) {
@@ -274,8 +272,8 @@ void turnRight(int speed) {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
-  ledcWrite(ENA, speed + 85);
-  ledcWrite(ENB, 100);
+  ledcWrite(ENA, speed + 80);
+  ledcWrite(ENB, speed - 85);
 }
 
 void turnLeft(int speed) {
@@ -283,8 +281,8 @@ void turnLeft(int speed) {
   digitalWrite(IN2, HIGH);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-  ledcWrite(ENA, 100);
-  ledcWrite(ENB, speed + 85);  
+  ledcWrite(ENA, speed - 75);
+  ledcWrite(ENB, speed + 70);
 }
 
 void moveBackward(int speed) {

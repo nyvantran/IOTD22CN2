@@ -96,7 +96,7 @@
     <h1>Điều khiển xe Robot</h1>
     <div class="camera-view">
         <h2>Camera View</h2>
-{#        <img id="camera-stream" src="http://192.168.1.18/stream" alt="Camera stream">#}
+       <img alt="" src="http://10.251.1.188:8000/api/stream-live-feed/" width="640" height="480" />
     </div>
 
     <div class="controls">
@@ -111,14 +111,14 @@
         <button class="empty"></button>
         <button onclick="sendCommand('backward')">⬇️ Lùi</button>
         <button class="empty"></button>
-        
+
         <button id="btn-auto" style="background-color: #ff9800;" onclick="toggleAutoDetect()">🔄 Detect: OFF</button>
 
     </div>
 
     <div class="speed-control">
-        <label for="speed">Tốc độ: <span id="speedValue">150</span></label><br>
-        <input type="range" id="speed" min="0" max="255" value="150"
+        <label for="speed">Tốc độ: <span id="speedValue">110</span></label><br>
+        <input type="range" id="speed" min="0" max="255" value="110"
                oninput="updateSpeed(this.value)">
     </div>
 
@@ -132,8 +132,8 @@
 </div>
 
 <script>
-    let currentSpeed = 150;
-    let autoDetectInterval = null;  
+    let currentSpeed = 110;
+    let autoDetectInterval = null;
 
     function updateSpeed(value) {
         currentSpeed = parseInt(value);
@@ -168,27 +168,27 @@
 
     function toggleAutoDetect() {
         const btn = document.getElementById('btn-auto');
-        
+
         if (autoDetectInterval) {
             clearInterval(autoDetectInterval);
             autoDetectInterval = null;
             btn.textContent = "🔄 Detect: OFF";
-            btn.style.backgroundColor = "#ff9800"; 
+            btn.style.backgroundColor = "#ff9800";
             document.getElementById('analysis-status').textContent = "Đã dừng tự động.";
         } else {
             runAnalysisTest();
             autoDetectInterval = setInterval(runAnalysisTest, 1000);
-            
+
             btn.textContent = "🔄 Detect: ON";
-            btn.style.backgroundColor = "#2196F3"; 
+            btn.style.backgroundColor = "#2196F3";
         }
     }
 
     async function runAnalysisTest() {
         const analysisDiv = document.getElementById('analysis-status');
-        
+
         if (!autoDetectInterval) {
-             analysisDiv.textContent = "Đang gửi yêu cầu...";
+            analysisDiv.textContent = "Đang gửi yêu cầu...";
         }
 
         try {
@@ -238,17 +238,17 @@
             let firstSign = data.detections[0];
             let confidencePercent = (firstSign.do_tin_cay * 100).toFixed(0);
 
-            analysisDiv.textContent = 
+            analysisDiv.textContent =
                 `Phát hiện: ${firstSign.bien_bao} (${confidencePercent}%)`;
-            analysisDiv.style.backgroundColor = "#dcedc8"; 
+            analysisDiv.style.backgroundColor = "#dcedc8";
 
         } else if (data.status === 'no_detection') {
             analysisDiv.textContent = "Phân tích: Không thấy biển báo.";
-            analysisDiv.style.backgroundColor = "#fffbe7"; 
+            analysisDiv.style.backgroundColor = "#fffbe7";
 
         } else if (data.status === 'error') {
             analysisDiv.textContent = "Lỗi phân tích: " + data.error_msg;
-            analysisDiv.style.backgroundColor = "#ffcdd2"; 
+            analysisDiv.style.backgroundColor = "#ffcdd2";
         }
     }
 

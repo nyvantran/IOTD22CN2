@@ -20,7 +20,7 @@ class LaneNavigator:
         self.k_angle = 0.8
         self.k_curvature = 0.5
 
-        self.steering_threshold = 0.2
+        self.steering_threshold = 0.35
         self.sharp_turn_threshold = 0.5
 
         self.prev_steering_score = 0
@@ -50,6 +50,7 @@ class LaneNavigator:
             self.Minv = np.array(data["Minv"], dtype=np.float32)
             self.standard_lane_width_pixels = data["standard_lane_width_pixels"]
             # Load lane width nếu có
+
             if "standard_lane_width" in data:
                 self.standard_lane_width_pixels = data["standard_lane_width"]
         print("Cấu hình đã được tải từ", filepath)
@@ -287,7 +288,7 @@ class LaneNavigator:
         current_width = right_x - left_x
 
         # Chỉ cập nhật nếu độ rộng hợp lý (200-800 pixels)
-        if 200 < current_width < 800:
+        if 25 < current_width < 70:
             self.lane_width_history.append(current_width)
             if len(self.lane_width_history) > self.max_history:
                 self.lane_width_history.pop(0)
@@ -494,7 +495,10 @@ class LaneNavigator:
     def calculate_steering_decision(self, lane_geometry, lane_status):
         """
         Tính toán quyết định điều khiển.
-        CẢI TIẾN: Điều chỉnh độ tin cậy dựa trên lane_status.
+
+        - 2 làn thật: offset + góc + cong (như cũ)
+        - 1 làn (một lane bị mất, lane kia ước lượng): bỏ offset,
+          chỉ dùng góc gần + cong cùng chiều với góc.
         """
         offset = lane_geometry["offset_meters"]
         angle = lane_geometry["lane_angle_deg"]
@@ -503,37 +507,83 @@ class LaneNavigator:
         curve_strength = lane_geometry["curvature_strength"]
         radius = lane_geometry["radius_meters"]
 
-        # Điều chỉnh trọng số dựa trên độ tin cậy
+        # Độ tin cậy & trạng thái làn
         confidence = lane_status.get("confidence", 1.0)
+        warning = lane_status.get("warning")
+        detection = lane_status.get("detection", {})
+        left_src = lane_status.get("left_source", "none")
+        right_src = lane_status.get("right_source", "none")
 
-        # Giảm độ nhạy khi confidence thấp (ước tính)
+        # 2 làn thật, tin cậy
+        both_lanes_reliable = (
+                detection.get("both_detected", False)
+                and warning is None
+                and left_src == "detected"
+                and right_src == "detected"
+                and confidence >= 0.6
+        )
+        # Chỉ còn 1 làn (bên kia mất/ước lượng)
+        single_lane_mode = (
+                detection.get("single_lane", False)
+                or warning in ("LEFT_LANE_MISSING", "RIGHT_LANE_MISSING")
+        )
+
+        # Trọng số cơ bản theo confidence
         effective_k_offset = self.k_offset * confidence
         effective_k_angle = self.k_angle * confidence
         effective_k_curvature = self.k_curvature * confidence
 
-        # Nếu chỉ có 1 làn, tăng trọng số cho offset để bám làn còn lại
-        warning = lane_status.get("warning")
-        if warning == "LEFT_LANE_MISSING":
-            # Mất làn trái -> có thể xe lệch trái -> tăng độ nhạy offset
-            effective_k_offset *= 1.3
-        elif warning == "RIGHT_LANE_MISSING":
-            # Mất làn phải -> có thể xe lệch phải
-            effective_k_offset *= 1.3
+        # Nếu chỉ 1 làn: bỏ offset, tăng vai trò góc + cong
+        if single_lane_mode:
+            effective_k_offset = 0.0
+            effective_k_angle *= 1.2
+            effective_k_curvature *= 1.5
 
-        # Chuẩn hóa và tính toán
-        offset_norm = np.clip(offset / 0.5, -1, 1)
-        offset_contribution = -effective_k_offset * offset_norm
+        # ===== TÍNH CÁC THÀNH PHẦN ĐÓNG GÓP =====
+        offset_contribution = 0.0
+        angle_contribution = 0.0
+        curve_contribution = 0.0
 
-        angle_norm = np.clip(angle / 25.0, -1, 1)
-        angle_near_norm = np.clip(angle_near / 20.0, -1, 1)
-        angle_combined = 0.4 * angle_norm + 0.6 * angle_near_norm
-        angle_contribution = effective_k_angle * angle_combined
+        # 2 làn thật hoặc mode "bình thường" -> logic cũ
+        if both_lanes_reliable or not single_lane_mode:
+            # Offset: offset > 0 => làn lệch trái => cần quẹo trái => dấu "-"
+            offset_norm = np.clip(offset / 0.5, -1, 1)
+            offset_contribution = -effective_k_offset * offset_norm
 
-        curve_norm = curve_dir * min(curve_strength / 50.0, 1.0)
-        curve_contribution = effective_k_curvature * curve_norm
+            # Góc: kết hợp xa + gần, ưu tiên góc gần
+            angle_norm = np.clip(angle / 25.0, -1, 1)
+            angle_near_norm = np.clip(angle_near / 20.0, -1, 1)
+            angle_combined = 0.4 * angle_norm + 0.6 * angle_near_norm
+            angle_contribution = effective_k_angle * angle_combined
 
-        # Tổng hợp
+            # Độ cong từ coef a
+            curve_norm = curve_dir * min(curve_strength / 50.0, 1.0)
+            curve_contribution = effective_k_curvature * curve_norm
+
+        # ===== CHẾ ĐỘ CHỈ 1 LÀN =====
+        else:
+            # Chỉ tin góc gần (ROI ~ 20cm trước xe)
+            angle_near_norm = np.clip(angle_near / 20.0, -1, 1)
+            angle_contribution = effective_k_angle * angle_near_norm
+
+            # Hướng cong: cho cùng chiều với góc gần
+            if abs(angle_near_norm) > 0.05:
+                curve_dir_single = np.sign(angle_near_norm)
+            else:
+                # Nếu góc rất nhỏ thì giữ hướng như frame trước (nếu có)
+                curve_dir_single = np.sign(self.prev_steering_score) if self.prev_steering_score != 0 else 0.0
+
+            # Độ mạnh cong: scale theo độ lớn góc gần (0..1)
+            curve_strength_single = min(abs(angle_near) / 20.0, 1.0)
+            curve_contribution = effective_k_curvature * curve_dir_single * curve_strength_single
+
+        # ===== TỔNG HỢP =====
         raw_steering_score = offset_contribution + angle_contribution + curve_contribution
+
+        # Van an toàn: trong chế độ 1 làn, không cho đổi dấu "gấp" khi tín hiệu yếu
+        if single_lane_mode and self.prev_steering_score != 0:
+            if raw_steering_score * self.prev_steering_score < 0 and abs(raw_steering_score) < 0.6:
+                raw_steering_score = np.sign(self.prev_steering_score) * abs(raw_steering_score)
 
         # Làm mượt - tăng smoothing khi confidence thấp
         effective_smoothing = min(0.6, self.smoothing_factor + (1 - confidence) * 0.2)
@@ -565,7 +615,7 @@ class LaneNavigator:
                 action_code = -1
             direction = "left"
 
-        # Thêm cảnh báo vào action nếu đang ước tính
+        # Gắn nhãn ước tính nếu confidence thấp
         if confidence < 0.7:
             action = f"[EST] {action}"
 
@@ -583,16 +633,21 @@ class LaneNavigator:
             "contributions": {
                 "offset": offset_contribution,
                 "angle": angle_contribution,
-                "curvature": curve_contribution
+                "curvature": curve_contribution,
             },
             "raw_data": {
                 "offset_m": offset,
                 "lane_angle": angle,
+                "lane_angle_near": angle_near,
                 "curve_direction": "left" if curve_dir < 0 else ("right" if curve_dir > 0 else "straight"),
-                "radius_m": radius
-            }
+                "radius_m": radius,
+                "mode": (
+                    "two_lanes" if both_lanes_reliable
+                    else ("single_lane" if single_lane_mode else "mixed")
+                ),
+                "warning": warning,
+            },
         }
-
     # ================================================================
     # =============== PROCESS FRAME CHÍNH ============================
     # ================================================================
@@ -902,6 +957,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+#
 lane_nav = LaneNavigator()
 lane_nav.load_config("control/lane_nav_config.json")

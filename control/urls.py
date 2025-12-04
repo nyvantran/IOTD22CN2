@@ -9,5 +9,6 @@ urlpatterns = [
     path('api/analyze-stream/', views.analyze_stream_once, name='analyze_stream'),
     path('api/detect/', views.detect_uploaded_image, name='detect_uploaded_image'),
     path('api/get-analysis/', views.get_analysis_result, name='get_analysis'),
+    path('api/stream-live-feed/', views.stream_live_feed, name='stream_live_feed'),
 
 ]

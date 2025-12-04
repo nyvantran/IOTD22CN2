@@ -64,13 +64,13 @@ class CarControl:
         self._command_before_pause = Command.STOP
 
         # Thông số điều khiển
-        self.steering_threshold_soft = 0.2
-        self.steering_threshold_hard = 0.4
+        self.steering_threshold_soft = 0.3
+        self.steering_threshold_hard = 0.6
         self.lost_lane_timeout = 1.0
         self._last_valid_detection_time = 0
 
         # Debug/Visualization
-        self.enable_display = False
+        self.enable_display = True
         self.latest_processed_frame = None
 
     # ================================================================
@@ -649,4 +649,3 @@ from .stream_manager import stream_manager
 from .lane_navigator import lane_nav
 
 car_control = CarControlAdvanced(stream_manager, lane_nav, base_speed=110, min_speed=100, max_speed=255)
-
