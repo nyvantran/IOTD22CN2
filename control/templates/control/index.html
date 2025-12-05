@@ -96,7 +96,7 @@
     <h1>Điều khiển xe Robot</h1>
     <div class="camera-view">
         <h2>Camera View</h2>
-       <img alt="" src="http://10.251.1.188:8000/api/stream-live-feed/" width="640" height="480" />
+        <img alt="" src="http://10.251.8.80:8000/api/stream-live-feed/" width="640" height="480"/>
     </div>
 
     <div class="controls">
@@ -157,7 +157,7 @@
 
             if (data.status === 'success') {
                 document.getElementById('status').textContent =
-                    `Trạng thái: ${command.toUpperCase()} - Tốc độ: ${currentSpeed}`;
+                    `Trạng thái: ${command.toUpperCase()} - Tốc độ: ${currentSpeed} - Dynamic mode: ${data.dynamic_speed_mode ? 'ON' : 'OFF'}`;
             }
         } catch (error) {
             console.error('Error:', error);

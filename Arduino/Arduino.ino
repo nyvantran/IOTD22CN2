@@ -7,7 +7,7 @@
 // Cấu hình WiFi
 const char* ssid = "PTIT.HCM_SV";
 const char* password = "";
-const char* serverUrl = "http://10.251.1.188:8000/api/command/";
+const char* serverUrl = "http://10.251.8.80:8000/api/command/";
 
 // Cấu hình speed
 const int kickstartspeed = 200;

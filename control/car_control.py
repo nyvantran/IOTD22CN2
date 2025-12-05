@@ -440,6 +440,11 @@ class CarControlAdvanced(CarControl):
                 "total_pause_time": 0.0
             }
 
+    def set_base_speed(self, speed: int):
+        """Đặt tốc độ cơ bản cho tính toán động."""
+        self.base_speed = speed
+        print(f"[CarControlAdvanced] Base speed set to: {self.base_speed}")
+
     def _calculate_dynamic_speed(self) -> int:
         """Tính tốc độ động dựa trên tình trạng đường."""
         info = self._current_info
