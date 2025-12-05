@@ -552,7 +552,7 @@ class LaneNavigator:
 
             # Góc: kết hợp xa + gần, ưu tiên góc gần
             angle_norm = np.clip(angle / 25.0, -1, 1)
-            angle_near_norm = np.clip(angle_near / 20.0, -1, 1)
+            angle_near_norm = np.clip(angle_near / 30.0, -1, 1)
             angle_combined = 0.4 * angle_norm + 0.6 * angle_near_norm
             angle_contribution = effective_k_angle * angle_combined
 

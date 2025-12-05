@@ -72,6 +72,12 @@ class CarControl:
         # Debug/Visualization
         self.enable_display = True
         self.latest_processed_frame = None
+        
+        # Debounce: cần X frame liên tiếp cùng hướng mới rẽ
+        self.required_turn_frames = 3      # hoặc 4 nếu muốn chắc hơn
+        self._last_decision_dir = 0        # -1 trái, 0 thẳng, 1 phải
+        self._direction_consistency = 0
+
 
     # ================================================================
     # =============== PAUSE/RESUME METHODS (MỚI) =====================
@@ -333,12 +339,38 @@ class CarControl:
 
         abs_score = abs(steering_score)
 
+        # 1. Xác định hướng AI muốn rẽ ở frame hiện tại
         if abs_score < self.steering_threshold_soft:
-            return Command.FORWARD
+            desired_dir = 0     # đi thẳng
         elif steering_score > 0:
+            desired_dir = 1     # phải
+        else:
+            desired_dir = -1    # trái
+
+        # 2. Nếu muốn đi thẳng → reset bộ đếm và trả về FORWARD
+        if desired_dir == 0:
+            self._direction_consistency = 0
+            self._last_decision_dir = 0
+            return Command.FORWARD
+
+        # 3. Nếu hướng giống frame trước → tăng độ “ổn định”
+        if desired_dir == self._last_decision_dir:
+            self._direction_consistency += 1
+        else:
+            # nếu đổi hướng → reset đếm
+            self._direction_consistency = 1
+            self._last_decision_dir = desired_dir
+
+        # 4. Nếu chưa đủ số frame liên tiếp → vẫn đi thẳng
+        if self._direction_consistency < self.required_turn_frames:
+            return Command.FORWARD
+
+        # 5. Đủ số frame → CHO RẼ
+        if desired_dir == 1:
             return Command.RIGHT
         else:
             return Command.LEFT
+
 
     def _set_command(self, command: Command, info: dict):
         """Thread-safe setter cho command và info."""
