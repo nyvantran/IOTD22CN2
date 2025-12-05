@@ -52,14 +52,20 @@ def set_command(request):
     # Lưu lệnh vào database (optional)
     Command.objects.create(command=command, speed=speed)
     car_control.set_speed(speed)
+    car_control.set_base_speed(speed)
     # Cập nhật lệnh hiện tại
     current_command = {'command': command, 'speed': speed}
     if command == 'stop':
         car_control.pause()
     if command == 'forward':
         car_control.resume()
+    if command == 'backward':
+        car_control.enable_dynamic_speed = ~car_control.enable_dynamic_speed
+        print("Dynamic speed:", car_control.enable_dynamic_speed)
+        print("Dynamic mode toggled.", "turn on" if car_control.enable_dynamic_speed else "turn off")
 
-    return Response({'status': 'success', 'command': command, 'speed': speed})
+    return Response({'status': 'success', 'command': command, 'speed': speed,
+                     "dynamic_speed_mode": car_control.enable_dynamic_speed})
 
 
 @api_view(['GET'])
@@ -255,7 +261,6 @@ def generate_processed_frames():
                    b'Content-Type: image/jpeg\r\n\r\n' + processed_jpg + b'\r\n')
         except Exception as e:
             print(f"Processing error: {e}")
-
 
 
 def stream_live_feed(request):

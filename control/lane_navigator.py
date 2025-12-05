@@ -563,7 +563,7 @@ class LaneNavigator:
         # ===== CHẾ ĐỘ CHỈ 1 LÀN =====
         else:
             # Chỉ tin góc gần (ROI ~ 20cm trước xe)
-            angle_near_norm = np.clip(angle_near / 20.0, -1, 1)
+            angle_near_norm = np.clip(angle_near / 25.0, -1, 1)
             angle_contribution = effective_k_angle * angle_near_norm
 
             # Hướng cong: cho cùng chiều với góc gần
