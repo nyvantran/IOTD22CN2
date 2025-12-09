@@ -64,8 +64,8 @@ class CarControl:
         self._command_before_pause = Command.STOP
 
         # Thông số điều khiển
-        self.steering_threshold_soft = 0.3
-        self.steering_threshold_hard = 0.6
+        self.steering_threshold_soft = 0.2
+        self.steering_threshold_hard = 0.5
         self.lost_lane_timeout = 1.0
         self._last_valid_detection_time = 0
 
@@ -74,7 +74,7 @@ class CarControl:
         self.latest_processed_frame = None
         
         # Debounce: cần X frame liên tiếp cùng hướng mới rẽ
-        self.required_turn_frames = 3      # hoặc 4 nếu muốn chắc hơn
+        self.required_turn_frames = 1      # hoặc 4 nếu muốn chắc hơn
         self._last_decision_dir = 0        # -1 trái, 0 thẳng, 1 phải
         self._direction_consistency = 0
 

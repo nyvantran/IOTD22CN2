@@ -11,34 +11,36 @@ class LaneNavigator:
         self.M = None
         self.Minv = None
 
-        # Thông số kỹ thuật
-        self.ym_per_pix = 30 / 720
-        self.xm_per_pix = 3.7 / 700
+        # Thông số kỹ thuật (override cho track giấy 20cm, cam thấp ~13–15cm)
+        # (ước lượng: ROI cao ~1/3 ảnh ~160 px)
+        self.ym_per_pix = 0.20 / 160.0          # ~0.00125 m/pixel dọc
+        self.xm_per_pix = 0.20 / 130.0          # lane 20cm ~130 px trong BEV
 
-        # Thông số điều khiển
-        self.k_offset = 1.0
-        self.k_angle = 0.8
-        self.k_curvature = 0.5
+        # Thông số điều khiển - GIẢM NHẠY để xe ổn định hơn
+        self.k_offset = 0.4                     # trước là 1.0
+        self.k_angle = 0.8                      # giữ
+        self.k_curvature = 0.2                  # trước là 0.5
 
-        self.steering_threshold = 0.35
+        self.steering_threshold = 0.2          # trước 0.35
         self.sharp_turn_threshold = 0.5
 
         self.prev_steering_score = 0
-        self.smoothing_factor = 0.3
+        self.smoothing_factor = 0.8             # trước 0.3 => mượt hơn
 
         # ===== THÔNG SỐ MỚI CHO XỬ LÝ 1 LÀN =====
-        self.standard_lane_width_pixels = 500  # Độ rộng làn chuẩn (pixels) - sẽ tự động cập nhật
-        self.lane_width_history = []  # Lịch sử độ rộng làn để tính trung bình
-        self.max_history = 30  # Số frame lưu lịch sử
+        # Track giấy: đường rộng 20cm, trong BEV ~120–140 px
+        self.standard_lane_width_pixels = 130   # trước 500, quá to
+        self.lane_width_history = []
+        self.max_history = 30
 
-        # Lưu trữ fit trước đó để dùng khi mất làn
+        # Lưu lại fit trước đó
         self.prev_left_fit = None
         self.prev_right_fit = None
-        self.frames_since_both_lanes = 0  # Số frame kể từ lần cuối thấy cả 2 làn
-        self.max_frames_without_both = 15  # Số frame tối đa cho phép dùng ước tính
+        self.frames_since_both_lanes = 0
+        self.max_frames_without_both = 15
 
-        # Ngưỡng số điểm tối thiểu để coi là phát hiện được làn
-        self.min_lane_points = 100
+        # Track nhỏ -> hạ ngưỡng điểm tối thiểu
+        self.min_lane_points = 50               # trước 100
 
     def load_config(self, filepath="lane_nav_config.json"):
         with open(filepath, "r") as f:
@@ -119,27 +121,92 @@ class LaneNavigator:
         print(f"Cấu hình hoàn tất. Độ rộng làn ước tính: {self.standard_lane_width_pixels}px")
         self.save_config()
 
+    # ==== ROI & BEV AUTO CHO GÓC CAM NÀY ====
+
+    def _compute_auto_roi_points(self, h, w):
+        """
+        ROI tự động:
+        - 1/3 ảnh từ dưới lên
+        - 5/7 bề ngang tính từ giữa ảnh
+        """
+        y_bottom = h - 1
+        y_top = int(h * (3.0 / 5.0))  # giữ 1/3 dưới
+
+        roi_width = int(w * 5.0 / 7.0)
+        half = roi_width // 2
+        cx = w // 2
+        x_left = max(0, cx - half)
+        x_right = min(w - 1, cx + half)
+
+        return np.array([
+            [x_left,  y_bottom],
+            [x_right, y_bottom],
+            [x_right, y_top],
+            [x_left,  y_top]
+        ], dtype=np.float32)
+
+    def _ensure_auto_bev(self, frame_shape):
+        """Khởi tạo src/dst cho BEV dựa trên ROI tự động (ghi đè config cũ)."""
+        h, w = frame_shape[:2]
+        roi_pts = self._compute_auto_roi_points(h, w)
+
+        # Lưu lại ROI để debug
+        self.roi_points = roi_pts.tolist()
+        self.bev_src_points = roi_pts
+
+        # Destination: hình chữ nhật gần full frame, chừa mép 15%
+        offset = int(w * 0.15)
+        self.bev_dst_points = np.float32([
+            [offset,     h],
+            [w - offset, h],
+            [w - offset, 0],
+            [offset,     0]
+        ])
+
+        self.M = cv2.getPerspectiveTransform(self.bev_src_points, self.bev_dst_points)
+        self.Minv = cv2.getPerspectiveTransform(self.bev_dst_points, self.bev_src_points)
+
+
     def preprocess_advanced(self, img):
-        """Kết hợp Color Threshold (HLS) và Gradient (Sobel)."""
+        """
+        Tiền xử lý cho track giấy trắng + băng keo đen (~1.5–2cm):
+
+        - ROI: 1/3 ảnh phía dưới + 5/7 bề ngang quanh tâm.
+        - HLS, lấy kênh L (Lightness).
+        - Tìm pixel TỐI (vạch đen) + cạnh (Sobel).
+        - Áp ROI mask: ngoài vùng chạy = 0.
+        - Trả về ảnh nhị phân 0/1.
+        """
+        h, w = img.shape[:2]
+
+        # 1. ROI mask
+        roi_poly = self._compute_auto_roi_points(h, w).astype(np.int32)
+        mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.fillPoly(mask, [roi_poly], 1)
+
+        # 2. HLS -> kênh L
         hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
         l_channel = hls[:, :, 1]
-        s_channel = hls[:, :, 2]
 
+        # 3. Gradient theo x (giữ logic cũ, nhưng ngưỡng mềm hơn)
         sobelx = cv2.Sobel(l_channel, cv2.CV_64F, 1, 0)
         abs_sobelx = np.absolute(sobelx)
         scaled_sobel = np.uint8(255 * abs_sobelx / (np.max(abs_sobelx) + 1e-6))
 
-        sxbinary = np.zeros_like(scaled_sobel)
-        sxbinary[(scaled_sobel >= 20) & (scaled_sobel <= 100)] = 1
+        sxbinary = np.zeros_like(scaled_sobel, dtype=np.uint8)
+        sxbinary[(scaled_sobel >= 20) & (scaled_sobel <= 150)] = 1
 
-        l_binary = np.zeros_like(l_channel)
-        l_binary[(l_channel >= 200) & (l_channel <= 255)] = 1
+        # 4. Ngưỡng L thấp -> vùng ĐEN
+        l_binary = np.zeros_like(l_channel, dtype=np.uint8)
+        # nếu vạch hơi xám thì có thể tăng 80 -> 100
+        l_binary[l_channel < 60] = 1
 
-        s_binary = np.zeros_like(s_channel)
-        s_binary[(s_channel >= 170) & (s_channel <= 255)] = 1
+        # 5. Kết hợp & áp ROI
+        combined_binary = np.zeros_like(sxbinary, dtype=np.uint8)
+        combined_binary[(sxbinary == 1) | (l_binary == 1)] = 1
 
-        combined_binary = np.zeros_like(sxbinary)
-        combined_binary[(s_binary == 1) | (sxbinary == 1) | (l_binary == 1)] = 1
+        # Chỉ giữ trong ROI
+        combined_binary = combined_binary * mask
 
         return combined_binary
 
@@ -173,7 +240,7 @@ class LaneNavigator:
         right_peak = right_half[rightx_base - midpoint] if len(right_half) > 0 else 0
 
         # Ngưỡng tối thiểu cho peak
-        min_peak_threshold = 50
+        min_peak_threshold = 20
 
         nwindows = 9
         window_height = np.int64(binary_warped.shape[0] / nwindows)
@@ -183,8 +250,8 @@ class LaneNavigator:
 
         leftx_current = leftx_base
         rightx_current = rightx_base
-        margin = 100
-        minpix = 50
+        margin = 60
+        minpix = 30
         left_lane_inds = []
         right_lane_inds = []
 
@@ -288,7 +355,7 @@ class LaneNavigator:
         current_width = right_x - left_x
 
         # Chỉ cập nhật nếu độ rộng hợp lý (200-800 pixels)
-        if 25 < current_width < 70:
+        if 250 < current_width < 450:
             self.lane_width_history.append(current_width)
             if len(self.lane_width_history) > self.max_history:
                 self.lane_width_history.pop(0)
@@ -654,6 +721,8 @@ class LaneNavigator:
 
     def process_frame(self, frame, debug=False):
         """Hàm xử lý chính cho 1 frame ảnh."""
+        self._ensure_auto_bev(frame.shape)
+
         if self.M is None:
             raise Exception("Vui lòng chạy select_points_interactive() hoặc load_config() trước!")
 
@@ -957,6 +1026,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-#
+
 lane_nav = LaneNavigator()
-lane_nav.load_config("control/lane_nav_config.json")
+lane_nav.load_config("E:\PTIT\Hoc Ky I nam IV\Iot va ung dung\IOTD22CN2\lane_nav_config.json")
