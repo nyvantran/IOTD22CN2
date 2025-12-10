@@ -10,8 +10,10 @@ const char* ssid = "PTIT.HCM_SV";
 const char* password = "";
 
 // Hai server URL (chỉnh IP theo hệ thống của bạn)
-const char* serverUrl1 = "http://10.251.8.80:8000/api/command/";
-const char* serverUrl2 = "http://10.251.8.81:8000/api/command/";  // IP dự phòng, sửa nếu cần
+
+const char* serverUrl1 = "http://10.251.5.141:8000/api/command/";
+const char* serverUrl2 = "http://10.251.5.144:8000/api/command/";  // IP dự phòng, sửa nếu cần
+
 const char* currentServerUrl = serverUrl1;
 
 // ======================= CẤU HÌNH SPEED / MOTOR =======================
@@ -20,10 +22,6 @@ const int kickstartspeed = 200;
 const int maxspeed = 255;
 const int kickstarttime = 120;
 
-// Tốc độ quay tại chỗ (rẽ nhẹ hơn)
-const int  turnBaseSpeed  = 100;   // càng nhỏ quay càng nhẹ (thử 80–120)
-const float leftTurnGain  = 1.0f;  // bù motor trái (0.9–1.1)
-const float rightTurnGain = 1.0f;  // bù motor phải
 
 // chế độ hiện tại
 const char* currenttask = "stop";
@@ -61,11 +59,12 @@ TaskHandle_t cameraTaskHandle;
 TaskHandle_t motorTaskHandle;
 
 // Shared variables
-volatile int  currentSpeed      = 110;
-volatile bool motorTaskRunning  = false;
+volatile int currentSpeed = 110;
+volatile bool motorTaskRunning = false;
 
 // PWM Configuration
-const int pwmFreq       = 5000;
+
+const int pwmFreq = 5000;
 const int pwmResolution = 8;
 
 // ======================= CAMERA SETUP =======================
@@ -73,35 +72,35 @@ const int pwmResolution = 8;
 void setupCamera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
-  config.ledc_timer   = LEDC_TIMER_0;
-  config.pin_d0       = Y2_GPIO_NUM;
-  config.pin_d1       = Y3_GPIO_NUM;
-  config.pin_d2       = Y4_GPIO_NUM;
-  config.pin_d3       = Y5_GPIO_NUM;
-  config.pin_d4       = Y6_GPIO_NUM;
-  config.pin_d5       = Y7_GPIO_NUM;
-  config.pin_d6       = Y8_GPIO_NUM;
-  config.pin_d7       = Y9_GPIO_NUM;
-  config.pin_xclk     = XCLK_GPIO_NUM;
-  config.pin_pclk     = PCLK_GPIO_NUM;
-  config.pin_vsync    = VSYNC_GPIO_NUM;
-  config.pin_href     = HREF_GPIO_NUM;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
   config.pin_sscb_sda = SIOD_GPIO_NUM;
   config.pin_sscb_scl = SIOC_GPIO_NUM;
-  config.pin_pwdn     = PWDN_GPIO_NUM;
-  config.pin_reset    = RESET_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size   = FRAMESIZE_VGA;
+  config.frame_size = FRAMESIZE_VGA;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
-  config.fb_location  = CAMERA_FB_IN_PSRAM;
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 15;
-  config.fb_count     = 1;
+  config.fb_count = 1;
 
   if (psramFound()) {
     config.jpeg_quality = 12;
-    config.fb_count     = 2;
-    config.grab_mode    = CAMERA_GRAB_LATEST;
+    config.fb_count = 2;
+    config.grab_mode = CAMERA_GRAB_LATEST;
   }
 
   esp_err_t err = esp_camera_init(&config);
@@ -127,10 +126,11 @@ void motorTask(void* parameter) {
 
   while (true) {
     if (WiFi.status() == WL_CONNECTED) {
-      const char* primary   = currentServerUrl;
+
+      const char* primary = currentServerUrl;
       const char* secondary = (currentServerUrl == serverUrl1) ? serverUrl2 : serverUrl1;
 
-      int    httpCode = -1;
+      int httpCode = -1;
       String payload;
 
       // --- Thử server hiện tại ---
@@ -147,9 +147,10 @@ void motorTask(void* parameter) {
         http.setTimeout(1500);
         int httpCode2 = http.GET();
         if (httpCode2 == HTTP_CODE_OK) {
-          payload        = http.getString();
-          httpCode       = httpCode2;
-          currentServerUrl = secondary;   // switch sang server dự phòng
+
+          payload = http.getString();
+          httpCode = httpCode2;
+          currentServerUrl = secondary;  // switch sang server dự phòng
           Serial.println("Switched to backup server");
         }
       }
@@ -160,13 +161,12 @@ void motorTask(void* parameter) {
 
         if (!error) {
           const char* command = doc["command"];
-          int speed           = doc["speed"] | currentSpeed;
-          currentSpeed        = speed;
+
+          int speed = doc["speed"] | currentSpeed;
+          currentSpeed = speed;
 
           // Kickstart khi chuyển từ stop sang lệnh chạy
-          if (strcmp(command, currenttask) != 0 &&
-              strcmp(command, "stop") != 0 &&
-              strcmp(currenttask, "stop") == 0) {
+          if (strcmp(command, currenttask) != 0 && strcmp(command, "forward") == 0) {
             kickStart(kickstartspeed);
           }
 
@@ -200,12 +200,13 @@ void motorTask(void* parameter) {
 
 void handleStream() {
   WiFiClient client = server.client();
-  String response   = "HTTP/1.1 200 OK\r\n";
+  String response = "HTTP/1.1 200 OK\r\n";
   response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
   client.print(response);
 
   const int64_t frameInterval = 150000;  // ~100ms ~ 10 FPS
-  int64_t lastFrameTime       = 0;
+
+  int64_t lastFrameTime = 0;
 
   while (client.connected()) {
     int64_t currentTime = esp_timer_get_time();
@@ -277,8 +278,8 @@ void setup() {
     NULL,
     1,
     &motorTaskHandle,
-    0
-  );
+
+    0);
 
   stopCar();
 
@@ -308,32 +309,22 @@ void kickStart(int speed) {
 
 // Quay phải tại chỗ (1 bánh tiến, 1 bánh lùi) nhưng nhẹ hơn
 void turnRight(int speed) {
-  int s = min(speed, turnBaseSpeed);
-  int leftPWM  = (int)(s * leftTurnGain);
-  int rightPWM = (int)(s * rightTurnGain);
-
   digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);   // trái tiến
+  digitalWrite(IN2, LOW);  // trái tiến
   digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);   // phải lùi
-
-  ledcWrite(ENA, leftPWM);
-  ledcWrite(ENB, rightPWM);
+  digitalWrite(IN4, LOW);  // phải lùi
+  ledcWrite(ENA, speed + 90);
+  ledcWrite(ENB, speed - 10);
 }
 
 // Quay trái tại chỗ (1 bánh lùi, 1 bánh tiến) nhưng nhẹ hơn
 void turnLeft(int speed) {
-  int s = min(speed, turnBaseSpeed);
-  int leftPWM  = (int)(s * leftTurnGain);
-  int rightPWM = (int)(s * rightTurnGain);
-
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, HIGH);  // trái lùi
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);  // phải tiến
-
-  ledcWrite(ENA, leftPWM);
-  ledcWrite(ENB, rightPWM);
+  ledcWrite(ENA, speed - 10);
+  ledcWrite(ENB, speed + 90);
 }
 
 void moveBackward(int speed) {

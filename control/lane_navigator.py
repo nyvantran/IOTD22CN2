@@ -13,23 +13,23 @@ class LaneNavigator:
 
         # Thông số kỹ thuật (override cho track giấy 20cm, cam thấp ~13–15cm)
         # (ước lượng: ROI cao ~1/3 ảnh ~160 px)
-        self.ym_per_pix = 0.20 / 160.0          # ~0.00125 m/pixel dọc
-        self.xm_per_pix = 0.20 / 130.0          # lane 20cm ~130 px trong BEV
+        self.ym_per_pix = 0.20 / 160.0  # ~0.00125 m/pixel dọc
+        self.xm_per_pix = 0.20 / 130.0  # lane 20cm ~130 px trong BEV
 
         # Thông số điều khiển - GIẢM NHẠY để xe ổn định hơn
-        self.k_offset = 0.4                     # trước là 1.0
-        self.k_angle = 0.8                      # giữ
-        self.k_curvature = 0.2                  # trước là 0.5
+        self.k_offset = 0.4  # trước là 1.0
+        self.k_angle = 0.8  # giữ
+        self.k_curvature = 0.2  # trước là 0.5
 
-        self.steering_threshold = 0.2          # trước 0.35
+        self.steering_threshold = 0.2  # trước 0.35
         self.sharp_turn_threshold = 0.5
 
         self.prev_steering_score = 0
-        self.smoothing_factor = 0.8             # trước 0.3 => mượt hơn
+        self.smoothing_factor = 0.8  # trước 0.3 => mượt hơn
 
         # ===== THÔNG SỐ MỚI CHO XỬ LÝ 1 LÀN =====
         # Track giấy: đường rộng 20cm, trong BEV ~120–140 px
-        self.standard_lane_width_pixels = 130   # trước 500, quá to
+        self.standard_lane_width_pixels = 130  # trước 500, quá to
         self.lane_width_history = []
         self.max_history = 30
 
@@ -40,7 +40,7 @@ class LaneNavigator:
         self.max_frames_without_both = 15
 
         # Track nhỏ -> hạ ngưỡng điểm tối thiểu
-        self.min_lane_points = 50               # trước 100
+        self.min_lane_points = 50  # trước 100
 
     def load_config(self, filepath="lane_nav_config.json"):
         with open(filepath, "r") as f:
@@ -139,10 +139,10 @@ class LaneNavigator:
         x_right = min(w - 1, cx + half)
 
         return np.array([
-            [x_left,  y_bottom],
+            [x_left, y_bottom],
             [x_right, y_bottom],
             [x_right, y_top],
-            [x_left,  y_top]
+            [x_left, y_top]
         ], dtype=np.float32)
 
     def _ensure_auto_bev(self, frame_shape):
@@ -157,15 +157,14 @@ class LaneNavigator:
         # Destination: hình chữ nhật gần full frame, chừa mép 15%
         offset = int(w * 0.15)
         self.bev_dst_points = np.float32([
-            [offset,     h],
+            [offset, h],
             [w - offset, h],
             [w - offset, 0],
-            [offset,     0]
+            [offset, 0]
         ])
 
         self.M = cv2.getPerspectiveTransform(self.bev_src_points, self.bev_dst_points)
         self.Minv = cv2.getPerspectiveTransform(self.bev_dst_points, self.bev_src_points)
-
 
     def preprocess_advanced(self, img):
         """
@@ -355,7 +354,8 @@ class LaneNavigator:
         current_width = right_x - left_x
 
         # Chỉ cập nhật nếu độ rộng hợp lý (200-800 pixels)
-        if 250 < current_width < 450:
+
+        if 250 < current_width < 650:
             self.lane_width_history.append(current_width)
             if len(self.lane_width_history) > self.max_history:
                 self.lane_width_history.pop(0)
@@ -715,6 +715,7 @@ class LaneNavigator:
                 "warning": warning,
             },
         }
+
     # ================================================================
     # =============== PROCESS FRAME CHÍNH ============================
     # ================================================================
@@ -728,6 +729,8 @@ class LaneNavigator:
 
         # 1. Preprocessing & Warp
         binary_img = self.preprocess_advanced(frame)
+        # cv2.imshow("binary", (binary_img * 255).astype(np.uint8))
+
         img_size = (frame.shape[1], frame.shape[0])
         warped = cv2.warpPerspective(binary_img, self.M, img_size, flags=cv2.INTER_LINEAR)
 
@@ -964,14 +967,14 @@ class LaneNavigator:
 def main():
     from stream_manager import stream_manager
 
-    stream_manager.start()
+    # stream_manager.start()
     lane_nav = LaneNavigator()
 
-    first_frame = stream_manager.get_latest_frame()
+    first_frame = cv2.imread("img_1.png")
 
     # Chọn cấu hình
-    lane_nav.select_points_interactive(first_frame)
-    # lane_nav.load_config("lane_nav_config.json")
+    # lane_nav.select_points_interactive(first_frame)
+    lane_nav.load_config("lane_nav_config.json")
 
     print("\n=== ĐIỀU KHIỂN ===")
     print("Q: Thoát")
@@ -980,7 +983,7 @@ def main():
     print("==================\n")
 
     while True:
-        frame = stream_manager.get_latest_frame()
+        frame = first_frame
 
         try:
             processed_frame, info = lane_nav.process_frame(frame, debug=True)
@@ -1028,4 +1031,5 @@ if __name__ == "__main__":
     main()
 
 lane_nav = LaneNavigator()
-lane_nav.load_config("E:\PTIT\Hoc Ky I nam IV\Iot va ung dung\IOTD22CN2\lane_nav_config.json")
+
+lane_nav.load_config("lane_nav_config.json")
