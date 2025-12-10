@@ -1,14 +1,12 @@
 from django.shortcuts import render
-from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import Command
 from .models import Command, DetectionResult
 from .stream_manager import stream_manager
-import json
+from .car_control import car_control
 import base64
-import time
+from django.http import StreamingHttpResponse
 
 from ultralytics import YOLO
 import cv2
@@ -35,6 +33,10 @@ def index(request):
 @api_view(['GET'])
 def get_command(request):
     """API endpoint để ESP32 lấy lệnh"""
+    cmd, speed = car_control.get_command()
+    print("GET COMMAND:", cmd, speed)
+    # global current_command
+    current_command = {'command': cmd, 'speed': speed}
     return Response(current_command)
 
 
@@ -45,15 +47,25 @@ def set_command(request):
     global current_command
 
     command = request.data.get('command', 'stop')
-    speed = request.data.get('speed', 150)
+    speed = request.data.get('speed', 110)
 
     # Lưu lệnh vào database (optional)
     Command.objects.create(command=command, speed=speed)
-
+    car_control.set_speed(speed)
+    car_control.set_base_speed(speed)
     # Cập nhật lệnh hiện tại
     current_command = {'command': command, 'speed': speed}
+    if command == 'stop':
+        car_control.pause()
+    if command == 'forward':
+        car_control.resume()
+    if command == 'backward':
+        car_control.enable_dynamic_speed = ~car_control.enable_dynamic_speed
+        print("Dynamic speed:", car_control.enable_dynamic_speed)
+        print("Dynamic mode toggled.", "turn on" if car_control.enable_dynamic_speed else "turn off")
 
-    return Response({'status': 'success', 'command': command, 'speed': speed})
+    return Response({'status': 'success', 'command': command, 'speed': speed,
+                     "dynamic_speed_mode": car_control.enable_dynamic_speed})
 
 
 @api_view(['GET'])
@@ -237,3 +249,20 @@ def detect_uploaded_image(request):
         error_msg = f"Lỗi xử lý: {str(e)}"
         last_analysis_result = {"detections": [], "status": "error", "error_msg": error_msg}
         return Response({"error": error_msg}, status=500)
+
+
+def generate_processed_frames():
+    while True:
+        try:
+            frame = car_control.latest_processed_frame.copy()
+            _, buffer = cv2.imencode('.jpg', frame)
+            processed_jpg = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + processed_jpg + b'\r\n')
+        except Exception as e:
+            print(f"Processing error: {e}")
+
+
+def stream_live_feed(request):
+    return StreamingHttpResponse(generate_processed_frames(),
+                                 content_type='multipart/x-mixed-replace; boundary=frame')
