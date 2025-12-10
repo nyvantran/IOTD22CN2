@@ -385,7 +385,7 @@ class CarControlAdvanced(CarControl):
     Phiên bản nâng cao của CarControl với nhiều tính năng hơn.
     """
 
-    def __init__(self, stream_manager, lane_nav, base_speed: int = 50,
+    def __init__(self, stream_manager, lane_nav, sign_detector = None, base_speed: int = 50,
                  min_speed: int = 20, max_speed: int = 80):
         super().__init__(stream_manager, lane_nav, base_speed)
 
@@ -411,6 +411,13 @@ class CarControlAdvanced(CarControl):
 
         # Theo dõi thời gian pause
         self._pause_start_time = None
+
+        # detect sign
+        self.sign_detector = sign_detector # Lưu instance detetor
+        
+        # Biến lưu trạng thái do biển báo tác động
+        self.force_stop_by_sign = False 
+        self.override_speed = None
 
     # ===== OVERRIDE PAUSE METHODS =====
 
@@ -549,6 +556,104 @@ class CarControlAdvanced(CarControl):
             return Command.FORWARD
 
         return new_command
+    # detect sign
+    def _control_loop(self):
+        """Vòng lặp điều khiển chính đã được nâng cấp"""
+        while self._running:
+            try:
+                # 1. Lấy dữ liệu
+                is_paused = self.is_paused()
+                frame = self.stream_manager.get_latest_frame()
+                
+                if frame is None:
+                    time.sleep(0.01)
+                    continue
+
+                # 2. Xử lý Làn đường (Luôn chạy để tính góc lái)
+                processed_frame, lane_info = self.lane_nav.process_frame(frame, debug=self.enable_display)
+                if self.enable_display:
+                    self.latest_processed_frame = processed_frame
+
+                # Nếu đang pause thủ công thì bỏ qua logic dưới
+                if is_paused:
+                    with self._lock:
+                        self._current_info = lane_info
+                    continue
+
+                # ====================================================
+                # 3. LOGIC HỢP NHẤT: BIỂN BÁO + LÀN ĐƯỜNG
+                # ====================================================
+                
+                # Lấy biển báo mới nhất từ luồng YOLO
+                current_sign = None
+                if self.sign_detector: 
+                    current_sign = self.sign_detector.get_current_sign()
+                
+                # --- XỬ LÝ TRẠNG THÁI TỪ BIỂN BÁO ---
+                if current_sign:
+                    # Case 1: Gặp Đèn Đỏ hoặc Stop
+                    if current_sign in self.sign_detector.STOP_LABELS:
+                        self.force_stop_by_sign = True
+                        print(f"[SIGN] PHÁT HIỆN: {current_sign} -> DỪNG XE")
+                    
+                    # Case 2: Gặp Đèn Xanh -> Được phép đi tiếp
+                    elif current_sign in self.sign_detector.GO_LABELS:
+                        self.force_stop_by_sign = False
+                        print(f"[SIGN] PHÁT HIỆN: {current_sign} -> ĐI TIẾP")
+
+                    # Case 3: Gặp Biển Tốc Độ -> Set tốc độ 110
+                    elif current_sign in self.sign_detector.SPEED_LABELS:
+                        self.override_speed = 115
+                        # self.set_base_speed(110) # Hoặc dùng hàm này
+                        print(f"[SIGN] PHÁT HIỆN: {current_sign} -> SET TỐC ĐỘ 115")
+
+                # --- RA QUYẾT ĐỊNH CUỐI CÙNG ---
+                # final_command = Command.STOP
+                # final_speed = 0
+
+                if self.force_stop_by_sign:
+                    # Ưu tiên cao nhất: Dừng do biển báo
+                    final_command = Command.STOP
+                    final_speed = 0
+                    lane_info['warning'] = f"STOP BY SIGN: {current_sign}" # Hiển thị lên màn hình
+                
+                else:
+                    # Không bị dừng -> Lái theo làn đường
+                    final_command = self._process_lane_info(lane_info)
+                    
+                    # Tính toán tốc độ
+                    if self.override_speed:
+                        final_speed = self.override_speed # Dùng tốc độ từ biển báo
+                    else:
+                        # Nếu không có biển, dùng tốc độ Dynamic của Lane Nav
+                        if self.enable_dynamic_speed:
+                            final_speed = self._calculate_dynamic_speed()
+                        else:
+                            final_speed = self.base_speed
+
+                # Cập nhật lệnh xuống ESP32/Database
+                self._set_command_with_sign_logic(final_command, final_speed, lane_info)
+                
+                # ====================================================
+
+                # (Phần tính FPS giữ nguyên...)
+                time.sleep(0.02) # Giữ chu kỳ lặp ổn định
+
+            except Exception as e:
+                print(f"Error: {e}")
+                time.sleep(0.1)
+
+    def _set_command_with_sign_logic(self, command, speed, info):
+        """Hàm cập nhật lệnh thay thế cho _set_command cũ để hỗ trợ speed tùy chỉnh"""
+        # Logic smoothing lệnh giữ nguyên...
+        smoothed_command = self._smooth_command(command)
+        
+        with self._lock:
+            self._current_command = smoothed_command
+            self.speed = speed # Cập nhật tốc độ thực tế sẽ gửi đi
+            self._current_info = info
+            self._last_update_time = time.time()
+
 
 
 # ========================================================
