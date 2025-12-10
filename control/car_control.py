@@ -74,10 +74,9 @@ class CarControl:
         self.latest_processed_frame = None
 
         # Debounce: cần X frame liên tiếp cùng hướng mới rẽ
-        self.required_turn_frames = 1      # hoặc 4 nếu muốn chắc hơn
-        self._last_decision_dir = 0        # -1 trái, 0 thẳng, 1 phải
+        self.required_turn_frames = 1  # hoặc 4 nếu muốn chắc hơn
+        self._last_decision_dir = 0  # -1 trái, 0 thẳng, 1 phải
         self._direction_consistency = 0
-
 
     # ================================================================
     # =============== PAUSE/RESUME METHODS (MỚI) =====================
@@ -336,16 +335,26 @@ class CarControl:
 
         if confidence < 0.3:
             return Command.FORWARD
+        if action_code == 0:
+            return Command.FORWARD
+        if action_code == 1:
+            return Command.RIGHT
+        if action_code == 2:
+            return Command.RIGHT
+        if action_code == -1:
+            return Command.LEFT
+        if action_code == -2:
+            return Command.LEFT
 
         abs_score = abs(steering_score)
 
         # 1. Xác định hướng AI muốn rẽ ở frame hiện tại
         if abs_score < self.steering_threshold_soft:
-            desired_dir = 0     # đi thẳng
+            desired_dir = 0  # đi thẳng
         elif steering_score > 0:
-            desired_dir = 1     # phải
+            desired_dir = 1  # phải
         else:
-            desired_dir = -1    # trái
+            desired_dir = -1  # trái
 
         # 2. Nếu muốn đi thẳng → reset bộ đếm và trả về FORWARD
         if desired_dir == 0:
@@ -370,7 +379,6 @@ class CarControl:
             return Command.RIGHT
         else:
             return Command.LEFT
-
 
     def _set_command(self, command: Command, info: dict):
         """Thread-safe setter cho command và info."""
@@ -685,4 +693,5 @@ if __name__ == "__main__":
 from .stream_manager import stream_manager
 # from .lane_navigator import lane_nav
 from .main1 import lane_nav
+
 car_control = CarControlAdvanced(stream_manager, lane_nav, base_speed=110, min_speed=100, max_speed=255)
