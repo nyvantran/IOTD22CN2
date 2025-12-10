@@ -17,15 +17,15 @@ class LaneNavigator:
         self.xm_per_pix = 0.20 / 130.0          # lane 20cm ~130 px trong BEV
 
         # Thông số điều khiển - GIẢM NHẠY để xe ổn định hơn
-        self.k_offset = 0.4                     # trước là 1.0
-        self.k_angle = 0.8                      # giữ
-        self.k_curvature = 0.2                  # trước là 0.5
+        self.k_offset = 0.25                    # trước là 1.0
+        self.k_angle = 0.6                      # giữ
+        self.k_curvature = 0.1                  # trước là 0.5
 
         self.steering_threshold = 0.2          # trước 0.35
         self.sharp_turn_threshold = 0.5
 
         self.prev_steering_score = 0
-        self.smoothing_factor = 0.8             # trước 0.3 => mượt hơn
+        self.smoothing_factor = 0.5             # trước 0.3 => mượt hơn
 
         # ===== THÔNG SỐ MỚI CHO XỬ LÝ 1 LÀN =====
         # Track giấy: đường rộng 20cm, trong BEV ~120–140 px
@@ -130,7 +130,7 @@ class LaneNavigator:
         - 5/7 bề ngang tính từ giữa ảnh
         """
         y_bottom = h - 1
-        y_top = int(h * (3.0 / 5.0))  # giữ 1/3 dưới
+        y_top = int(h * (2.0 / 3.0))  # giữ 1/3 dưới
 
         roi_width = int(w * 5.0 / 7.0)
         half = roi_width // 2
@@ -653,9 +653,22 @@ class LaneNavigator:
                 raw_steering_score = np.sign(self.prev_steering_score) * abs(raw_steering_score)
 
         # Làm mượt - tăng smoothing khi confidence thấp
-        effective_smoothing = min(0.6, self.smoothing_factor + (1 - confidence) * 0.2)
+        # Làm mượt - tăng smoothing khi confidence thấp (0.7–0.95)
+        base = self.smoothing_factor              # vd: 0.9
+        effective_smoothing = np.clip(
+            base + (1 - confidence) * 0.05,       # confidence thấp -> nhích thêm một chút
+            0.3,                                  # tối thiểu
+            0.9                                  # tối đa để khỏi quá ì
+        )
+        
+        # Nếu hướng raw khác hướng trước đó và raw khá mạnh -> tin tín hiệu mới hơn
+        if self.prev_steering_score != 0 and raw_steering_score * self.prev_steering_score < 0 \
+                and abs(raw_steering_score) > 0.3:
+            effective_smoothing = min(effective_smoothing, 0.3)
+
         steering_score = (effective_smoothing * self.prev_steering_score +
-                          (1 - effective_smoothing) * raw_steering_score)
+                        (1 - effective_smoothing) * raw_steering_score)
+
         self.prev_steering_score = steering_score
 
         # Quyết định hành động
