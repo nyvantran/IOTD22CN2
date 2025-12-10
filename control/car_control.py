@@ -607,10 +607,10 @@ class CarControlAdvanced(CarControl):
                         print(f"[SIGN] PHÁT HIỆN: {current_sign} -> ĐI TIẾP")
 
                     # Case 3: Gặp biển TỐC ĐỘ
-                    elif current_sign in self.sign_detector.SPEED_LABELS:
-                        self.override_speed = 110
-                        # (Tuỳ bạn có dùng override_speed hay không)
-                        print(f"[SIGN] PHÁT HIỆN: {current_sign} -> SET TỐC ĐỘ 110")
+                    # elif current_sign in self.sign_detector.SPEED_LABELS:
+                    #     self.override_speed = 110
+                    #     # (Tuỳ bạn có dùng override_speed hay không)
+                    #     print(f"[SIGN] PHÁT HIỆN: {current_sign} -> SET TỐC ĐỘ 110")
 
                     # Case 4: Biển khác (TURN LEFT/RIGHT, WARNING, …)
                     else:
