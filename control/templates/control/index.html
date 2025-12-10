@@ -166,37 +166,6 @@
         }
     }
 
-    function toggleAutoDetect() {
-        const btn = document.getElementById('btn-auto');
-
-        if (autoDetectInterval) {
-            clearInterval(autoDetectInterval);
-            autoDetectInterval = null;
-            btn.textContent = "🔄 Detect: OFF";
-            btn.style.backgroundColor = "#ff9800";
-            document.getElementById('analysis-status').textContent = "Đã dừng tự động.";
-        } else {
-            // runAnalysisTest();
-            // autoDetectInterval = setInterval(runAnalysisTest, 1000);
-
-            btn.textContent = "🔄 Detect: ON";
-            btn.style.backgroundColor = "#2196F3";
-        }
-    }
-
-    async function runAnalysisTest() {
-        const analysisDiv = document.getElementById('analysis-status');
-
-        if (!autoDetectInterval) {
-            analysisDiv.textContent = "Đang gửi yêu cầu...";
-        }
-
-        try {
-            const response = await fetch('/api/analyze-stream/');
-        } catch (error) {
-            console.error('Lỗi khi gọi phân tích:', error);
-        }
-    }
 
     // Điều khiển bằng bàn phím
     document.addEventListener('keydown', (event) => {
@@ -230,40 +199,6 @@
     // if (esp32IP) {
     //     document.getElementById('camera-stream').src = esp32IP;
     // }
-
-    function updateAnalysisDisplay(data) {
-        const analysisDiv = document.getElementById('analysis-status');
-
-        if (data.status === 'success' && data.detections.length > 0) {
-            let firstSign = data.detections[0];
-            let confidencePercent = (firstSign.do_tin_cay * 100).toFixed(0);
-
-            analysisDiv.textContent =
-                `Phát hiện: ${firstSign.bien_bao} (${confidencePercent}%)`;
-            analysisDiv.style.backgroundColor = "#dcedc8";
-
-        } else if (data.status === 'no_detection') {
-            analysisDiv.textContent = "Phân tích: Không thấy biển báo.";
-            analysisDiv.style.backgroundColor = "#fffbe7";
-
-        } else if (data.status === 'error') {
-            analysisDiv.textContent = "Lỗi phân tích: " + data.error_msg;
-            analysisDiv.style.backgroundColor = "#ffcdd2";
-        }
-    }
-
-    async function fetchAnalysisResult() {
-        try {
-            const response = await fetch('/api/get-analysis/');
-            const data = await response.json();
-            updateAnalysisDisplay(data);
-
-        } catch (error) {
-            console.error('Lỗi khi lấy kết quả phân tích:', error);
-            document.getElementById('analysis-status').textContent = 'Lỗi kết nối phân tích.';
-        }
-    }
-
     setInterval(fetchAnalysisResult, 1000);
 </script>
 </body>

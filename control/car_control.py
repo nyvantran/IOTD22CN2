@@ -47,7 +47,7 @@ class CarControl:
         self._lock = threading.Lock()
 
         # ===== PAUSE CONTROL (MỚI) =====
-        self._paused = False
+        self._paused = True
         self._pause_lock = threading.Lock()
         self._pause_event = threading.Event()
         self._pause_event.set()  # Mặc định không pause (event được set)
@@ -417,7 +417,7 @@ class CarControlAdvanced(CarControl):
         
         # Biến lưu trạng thái do biển báo tác động
         self.force_stop_by_sign = False 
-        self.override_speed = None
+        self.override_speed = 110
 
     # ===== OVERRIDE PAUSE METHODS =====
 
@@ -580,64 +580,58 @@ class CarControlAdvanced(CarControl):
                         self._current_info = lane_info
                     continue
 
-                # ====================================================
-                # 3. LOGIC HỢP NHẤT: BIỂN BÁO + LÀN ĐƯỜNG
-                # ====================================================
                 
                 # Lấy biển báo mới nhất từ luồng YOLO
+                # 3. LOGIC HỢP NHẤT: BIỂN BÁO + LÀN ĐƯỜNG
+                # ====================================================
+            
                 current_sign = None
-                if self.sign_detector: 
+                if self.sign_detector:
                     current_sign = self.sign_detector.get_current_sign()
-                
-                # --- XỬ LÝ TRẠNG THÁI TỪ BIỂN BÁO ---
-                if current_sign:
-                    # Case 1: Gặp Đèn Đỏ hoặc Stop
+
+                # --- RESET KHI KHÔNG CÒN THẤY BIỂN NÀO ---
+                if current_sign is None:
+                    # Không còn thấy biển báo -> bỏ chế độ STOP do biển
+                    self.force_stop_by_sign = False
+
+                # --- XỬ LÝ TRẠNG THÁI TỪ BIỂN BÁO KHI CÓ current_sign ---
+                else:
+                    # Case 1: Gặp biển/đèn dừng (STOP, RED)
                     if current_sign in self.sign_detector.STOP_LABELS:
                         self.force_stop_by_sign = True
                         print(f"[SIGN] PHÁT HIỆN: {current_sign} -> DỪNG XE")
-                    
-                    # Case 2: Gặp Đèn Xanh -> Được phép đi tiếp
+
+                    # Case 2: Gặp đèn xanh / biển CHO ĐI
                     elif current_sign in self.sign_detector.GO_LABELS:
                         self.force_stop_by_sign = False
                         print(f"[SIGN] PHÁT HIỆN: {current_sign} -> ĐI TIẾP")
 
-                    # Case 3: Gặp Biển Tốc Độ -> Set tốc độ 110
+                    # Case 3: Gặp biển TỐC ĐỘ
                     elif current_sign in self.sign_detector.SPEED_LABELS:
-                        self.override_speed = 115
-                        # self.set_base_speed(110) # Hoặc dùng hàm này
-                        print(f"[SIGN] PHÁT HIỆN: {current_sign} -> SET TỐC ĐỘ 115")
+                        self.override_speed = 110
+                        # (Tuỳ bạn có dùng override_speed hay không)
+                        print(f"[SIGN] PHÁT HIỆN: {current_sign} -> SET TỐC ĐỘ 110")
+
+                    # Case 4: Biển khác (TURN LEFT/RIGHT, WARNING, …)
+                    else:
+                        # Ở đây mình cũng bỏ chế độ STOP, tuỳ ý bạn
+                        self.force_stop_by_sign = False
 
                 # --- RA QUYẾT ĐỊNH CUỐI CÙNG ---
-                # final_command = Command.STOP
-                # final_speed = 0
-
                 if self.force_stop_by_sign:
                     # Ưu tiên cao nhất: Dừng do biển báo
                     final_command = Command.STOP
-                    final_speed = 0
-                    lane_info['warning'] = f"STOP BY SIGN: {current_sign}" # Hiển thị lên màn hình
-                
+                    lane_info['warning'] = f"STOP BY SIGN"
                 else:
                     # Không bị dừng -> Lái theo làn đường
                     final_command = self._process_lane_info(lane_info)
-                    
-                    # Tính toán tốc độ
-                    if self.override_speed:
-                        final_speed = self.override_speed # Dùng tốc độ từ biển báo
-                    else:
-                        # Nếu không có biển, dùng tốc độ Dynamic của Lane Nav
-                        if self.enable_dynamic_speed:
-                            final_speed = self._calculate_dynamic_speed()
-                        else:
-                            final_speed = self.base_speed
 
                 # Cập nhật lệnh xuống ESP32/Database
-                self._set_command_with_sign_logic(final_command, final_speed, lane_info)
-                
-                # ====================================================
+                self._set_command_with_sign_logic(final_command, self.speed, lane_info)
 
-                # (Phần tính FPS giữ nguyên...)
-                time.sleep(0.02) # Giữ chu kỳ lặp ổn định
+                # ====================================================
+                time.sleep(0.02)
+
 
             except Exception as e:
                 print(f"Error: {e}")

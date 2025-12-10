@@ -26,19 +26,19 @@ class SignDetector:
         """Vòng lặp chạy ngầm để detect liên tục"""
         print("--- Bắt đầu luồng nhận diện biển báo ---")
         while self.running:
-            frame = stream_manager.get_latest_frame()
+            frame = stream_manager.get_latest_frame().copy()
             if frame is None:
                 time.sleep(0.1)
                 continue
 
             h, w = frame.shape[:2]
-            start_y = int(h * 0.5)
+            start_y = int(h * 0.33)
 
             roi_frame = frame[start_y:h, 0:w]
             # Chạy YOLO (verbose=False để đỡ spam log)
             try:
                 results = self.model(roi_frame, verbose=False, conf=self.conf_threshold)
-                
+                    
                 detected = None
                 highest_conf = 0
 
