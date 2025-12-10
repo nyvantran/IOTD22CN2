@@ -72,9 +72,9 @@ class CarControl:
         # Debug/Visualization
         self.enable_display = True
         self.latest_processed_frame = None
-        
+
         # Debounce: cần X frame liên tiếp cùng hướng mới rẽ
-        self.required_turn_frames = 3      # hoặc 4 nếu muốn chắc hơn
+        self.required_turn_frames = 1      # hoặc 4 nếu muốn chắc hơn
         self._last_decision_dir = 0        # -1 trái, 0 thẳng, 1 phải
         self._direction_consistency = 0
 
@@ -558,11 +558,11 @@ class CarControlAdvanced(CarControl):
 def main():
     """Ví dụ sử dụng CarControl với pause/resume."""
     from stream_manager import stream_manager
-    from lane_navigator import LaneNavigator
+    # from lane_navigator import LaneNavigator
+    from main1 import lane_nav
     # 1. Khởi tạo
     stream_manager.start()
 
-    lane_nav = LaneNavigator()
     lane_nav.load_config("lane_nav_config.json")
 
     # 2. Tạo CarControl
@@ -683,6 +683,6 @@ if __name__ == "__main__":
     main()
 
 from .stream_manager import stream_manager
-from .lane_navigator import lane_nav
-
+# from .lane_navigator import lane_nav
+from .main1 import lane_nav
 car_control = CarControlAdvanced(stream_manager, lane_nav, base_speed=110, min_speed=100, max_speed=255)

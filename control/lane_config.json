@@ -1,0 +1,24 @@
+{
+    "roi_points": [
+        [
+            7,
+            240
+        ],
+        [
+            88,
+            160
+        ],
+        [
+            582,
+            162
+        ],
+        [
+            639,
+            248
+        ]
+    ],
+    "preprocess_mode": "robust",
+    "nwindows": 9,
+    "margin": 100,
+    "minpix": 50
+}

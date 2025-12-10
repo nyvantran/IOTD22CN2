@@ -288,7 +288,7 @@ class LaneNavigator:
         current_width = right_x - left_x
 
         # Chỉ cập nhật nếu độ rộng hợp lý (200-800 pixels)
-        if 25 < current_width < 70:
+        if 250 < current_width < 650:
             self.lane_width_history.append(current_width)
             if len(self.lane_width_history) > self.max_history:
                 self.lane_width_history.pop(0)
@@ -648,6 +648,7 @@ class LaneNavigator:
                 "warning": warning,
             },
         }
+
     # ================================================================
     # =============== PROCESS FRAME CHÍNH ============================
     # ================================================================
@@ -659,6 +660,8 @@ class LaneNavigator:
 
         # 1. Preprocessing & Warp
         binary_img = self.preprocess_advanced(frame)
+        # cv2.imshow("binary", (binary_img * 255).astype(np.uint8))
+
         img_size = (frame.shape[1], frame.shape[0])
         warped = cv2.warpPerspective(binary_img, self.M, img_size, flags=cv2.INTER_LINEAR)
 
@@ -895,14 +898,14 @@ class LaneNavigator:
 def main():
     from stream_manager import stream_manager
 
-    stream_manager.start()
+    # stream_manager.start()
     lane_nav = LaneNavigator()
 
-    first_frame = stream_manager.get_latest_frame()
+    first_frame = cv2.imread("img_1.png")
 
     # Chọn cấu hình
-    lane_nav.select_points_interactive(first_frame)
-    # lane_nav.load_config("lane_nav_config.json")
+    # lane_nav.select_points_interactive(first_frame)
+    lane_nav.load_config("lane_nav_config.json")
 
     print("\n=== ĐIỀU KHIỂN ===")
     print("Q: Thoát")
@@ -911,7 +914,7 @@ def main():
     print("==================\n")
 
     while True:
-        frame = stream_manager.get_latest_frame()
+        frame = first_frame
 
         try:
             processed_frame, info = lane_nav.process_frame(frame, debug=True)
@@ -959,4 +962,4 @@ if __name__ == "__main__":
     main()
 #
 lane_nav = LaneNavigator()
-lane_nav.load_config("control/lane_nav_config.json")
+lane_nav.load_config("lane_nav_config.json")
