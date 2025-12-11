@@ -61,13 +61,8 @@ def set_command(request):
         car_control.pause()
     if command == 'forward':
         car_control.resume()
-    if command == 'backward':
-        car_control.enable_dynamic_speed = ~car_control.enable_dynamic_speed
-        print("Dynamic speed:", car_control.enable_dynamic_speed)
-        print("Dynamic mode toggled.", "turn on" if car_control.enable_dynamic_speed else "turn off")
 
-    return Response({'status': 'success', 'command': command, 'speed': speed,
-                     "dynamic_speed_mode": car_control.enable_dynamic_speed})
+    return Response({'status': 'success', 'command': command, 'speed': speed})
 
 
 @api_view(['GET'])

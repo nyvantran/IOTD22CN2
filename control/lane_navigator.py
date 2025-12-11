@@ -602,7 +602,7 @@ class LaneNavigator:
 
         # Nếu chỉ 1 làn: bỏ offset, tăng vai trò góc + cong
         if single_lane_mode:
-            effective_k_offset = 0.0
+            effective_k_offset *= 0.2
             effective_k_angle *= 1.2
             effective_k_curvature *= 1.5
 

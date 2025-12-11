@@ -393,8 +393,6 @@ class CarControlAdvanced(CarControl):
         self.min_speed = min_speed
         self.max_speed = max_speed
 
-        self.enable_dynamic_speed = False
-
         self._stats = {
             "total_frames": 0,
             "forward_count": 0,
@@ -449,10 +447,7 @@ class CarControlAdvanced(CarControl):
             if self._current_command == Command.STOP:
                 return (command, 0)
 
-            if self.enable_dynamic_speed:
-                speed = self._calculate_dynamic_speed()
-            else:
-                speed = self.speed
+            speed = self.speed
 
             return (command, speed)
 
@@ -483,29 +478,6 @@ class CarControlAdvanced(CarControl):
         """Đặt tốc độ cơ bản cho tính toán động."""
         self.base_speed = speed
         print(f"[CarControlAdvanced] Base speed set to: {self.base_speed}")
-
-    def _calculate_dynamic_speed(self) -> int:
-        """Tính tốc độ động dựa trên tình trạng đường."""
-        info = self._current_info
-        speed = self.base_speed
-
-        radius = info.get("raw_data", {}).get("radius_m", float('inf'))
-        confidence = info.get("confidence", 1.0)
-        steering_score = abs(info.get("steering_score", 0))
-
-        if radius < 100:
-            speed_factor = max(0.5, radius / 100)
-            speed = int(speed * speed_factor)
-
-        if steering_score > 0.3:
-            speed_factor = max(0.6, 1 - steering_score * 0.5)
-            speed = int(speed * speed_factor)
-
-        if confidence < 0.7:
-            speed = int(speed * confidence)
-
-        speed = max(self.min_speed, min(self.max_speed, speed))
-        return speed
 
     def _set_command(self, command: Command, info: dict):
         """Override để thêm statistics và smoothing."""

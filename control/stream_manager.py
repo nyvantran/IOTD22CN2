@@ -15,7 +15,7 @@ class StreamManager:
             cls._instance = super(StreamManager, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, url="http://192.168.1.11/stream"):
+    def __init__(self, url="http://192.168.13.211/stream"):
         if not hasattr(self, 'is_initialized'):
             self.url = url
             self.latest_frame = None
@@ -77,7 +77,7 @@ class StreamManager:
 
 
 # Tạo một instance duy nhất (singleton) để toàn bộ ứng dụng sử dụng
-URL_STREAM = "http://10.251.5.145/stream"
+URL_STREAM = "http://10.251.13.211/stream"
 stream_manager = StreamManager(url=URL_STREAM)
 # stream_manager.start()
 # cv2.imwrite("test.jpg", stream_manager.get_latest_frame())

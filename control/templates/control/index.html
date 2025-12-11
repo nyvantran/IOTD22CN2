@@ -188,7 +188,7 @@
   </head>
   <body>
     <div class="container">
-      <h1>Điều khiển xe Robot</h1>
+      <h1>Điều khiển xe</h1>
 
       <div class="main-layout">
         <!-- BÊN TRÁI: FRAME -->
@@ -251,7 +251,6 @@
             </div>
 
             <hr />
-
           </div>
 
           <!-- BOX 2: ĐIỀU KHIỂN -->
@@ -275,28 +274,24 @@
             </div>
 
             <div class="speed-control">
-              <label for="speed">Tốc độ: <span id="speedValue">110</span></label
+              <label for="speed">Tốc độ: <span id="speedValue">90</span></label
               ><br />
               <input
                 type="range"
                 id="speed"
                 min="0"
                 max="255"
-                value="110"
+                value="90"
                 oninput="updateSpeed(this.value)"
               />
             </div>
-
-            <div class="status" id="status">Trạng thái: Đang chờ lệnh.</div>
-
-            <div class="status" id="analysis-status">Phân tích: Đang chờ.</div>
           </div>
         </div>
       </div>
     </div>
 
     <script>
-      let currentSpeed = 110;
+      let currentSpeed = 90;
 
       function updateSpeed(value) {
         currentSpeed = parseInt(value);
@@ -321,9 +316,7 @@
           if (data.status === "success") {
             document.getElementById(
               "status"
-            ).textContent = `Trạng thái: ${command.toUpperCase()} - Tốc độ: ${currentSpeed} - Dynamic mode: ${
-              data.dynamic_speed_mode ? "ON" : "OFF"
-            }`;
+            ).textContent = `Trạng thái: ${command.toUpperCase()} - Tốc độ: ${currentSpeed}`;
           }
         } catch (error) {
           console.error("Error:", error);
@@ -454,48 +447,6 @@
           }
         } catch (e) {
           console.error("fetchControlInfo error:", e);
-        }
-      }
-
-      // Lấy kết quả YOLO từ last_analysis_result
-      async function fetchAnalysisResult() {
-        try {
-          const res = await fetch("/api/get-analysis/");
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          const data = await res.json();
-
-          const analysisStatusEl = document.getElementById("analysis-status");
-          const signStatusEl = document.getElementById("sign-status");
-          const listEl = document.getElementById("sign-list");
-
-          const statusText = data.status || "idle";
-          analysisStatusEl.textContent = `Phân tích: ${statusText}`;
-
-          listEl.innerHTML = "";
-
-          if (data.detections && data.detections.length > 0) {
-            signStatusEl.textContent = `Đã phát hiện ${data.detections.length} biển báo`;
-            data.detections.forEach((det) => {
-              const li = document.createElement("li");
-              const name = det.bien_bao || "Unknown";
-              const conf =
-                det.do_tin_cay !== undefined && det.do_tin_cay !== null
-                  ? Math.round(det.do_tin_cay * 100)
-                  : null;
-              li.textContent = conf !== null ? `${name} (${conf}%)` : name;
-              listEl.appendChild(li);
-            });
-          } else {
-            if (statusText === "error") {
-              signStatusEl.textContent = "Lỗi khi phân tích biển báo";
-            } else if (statusText === "no_detection") {
-              signStatusEl.textContent = "Không phát hiện biển báo nào";
-            } else {
-              signStatusEl.textContent = "Chưa có kết quả";
-            }
-          }
-        } catch (e) {
-          console.error("fetchAnalysisResult error:", e);
         }
       }
 
