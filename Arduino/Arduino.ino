@@ -9,7 +9,7 @@
 const char* ssid = "PTIT.HCM_SV";
 const char* password = "";
 
-const char* serverUrl1 = "http://10.251.13.209:8000/api/command/";
+const char* serverUrl1 = "http://10.251.4.3:8000/api/command/";
 const char* serverUrl2 = "http://10.251.13.206:8000/api/command/";
 
 const char* currentServerUrl = serverUrl1;
@@ -323,7 +323,7 @@ void handleStream() {
   response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
   client.print(response);
 
-  const int64_t frameInterval = 100000;
+  const int64_t frameInterval = 120000;
   int64_t lastFrameTime = 0;
 
   while (client.connected()) {
@@ -446,7 +446,7 @@ void turnRight(int speed) {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
-  ledcWrite(ENA, 190);
+  ledcWrite(ENA, 180);
   ledcWrite(ENB, speed - 10);
 }
 
@@ -456,7 +456,7 @@ void turnLeft(int speed) {
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
   ledcWrite(ENA, speed - 10);
-  ledcWrite(ENB, 190);
+  ledcWrite(ENB, 180);
 }
 
 void moveBackward(int speed) {
