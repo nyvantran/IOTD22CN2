@@ -47,7 +47,7 @@ class CarControl:
         self._lock = threading.Lock()
 
         # ===== PAUSE CONTROL (MỚI) =====
-        self._paused = False
+        self._paused = True
         self._pause_lock = threading.Lock()
         self._pause_event = threading.Event()
         self._pause_event.set()  # Mặc định không pause (event được set)
@@ -335,16 +335,6 @@ class CarControl:
 
         if confidence < 0.3:
             return Command.FORWARD
-        if action_code == 0:
-            return Command.FORWARD
-        if action_code == 1:
-            return Command.RIGHT
-        if action_code == 2:
-            return Command.RIGHT
-        if action_code == -1:
-            return Command.LEFT
-        if action_code == -2:
-            return Command.LEFT
 
         abs_score = abs(steering_score)
 
@@ -393,15 +383,13 @@ class CarControlAdvanced(CarControl):
     Phiên bản nâng cao của CarControl với nhiều tính năng hơn.
     """
 
-    def __init__(self, stream_manager, lane_nav, base_speed: int = 50,
+    def __init__(self, stream_manager, lane_nav, sign_detector=None, base_speed: int = 50,
                  min_speed: int = 20, max_speed: int = 80):
         super().__init__(stream_manager, lane_nav, base_speed)
 
         self.base_speed = base_speed
         self.min_speed = min_speed
         self.max_speed = max_speed
-
-        self.enable_dynamic_speed = False
 
         self._stats = {
             "total_frames": 0,
@@ -419,6 +407,13 @@ class CarControlAdvanced(CarControl):
 
         # Theo dõi thời gian pause
         self._pause_start_time = None
+
+        # detect sign
+        self.sign_detector = sign_detector  # Lưu instance detetor
+
+        # Biến lưu trạng thái do biển báo tác động
+        self.force_stop_by_sign = False
+        self.override_speed = 110
 
     # ===== OVERRIDE PAUSE METHODS =====
 
@@ -450,10 +445,7 @@ class CarControlAdvanced(CarControl):
             if self._current_command == Command.STOP:
                 return (command, 0)
 
-            if self.enable_dynamic_speed:
-                speed = self._calculate_dynamic_speed()
-            else:
-                speed = self.speed
+            speed = self.speed
 
             return (command, speed)
 
@@ -484,29 +476,6 @@ class CarControlAdvanced(CarControl):
         """Đặt tốc độ cơ bản cho tính toán động."""
         self.base_speed = speed
         print(f"[CarControlAdvanced] Base speed set to: {self.base_speed}")
-
-    def _calculate_dynamic_speed(self) -> int:
-        """Tính tốc độ động dựa trên tình trạng đường."""
-        info = self._current_info
-        speed = self.base_speed
-
-        radius = info.get("raw_data", {}).get("radius_m", float('inf'))
-        confidence = info.get("confidence", 1.0)
-        steering_score = abs(info.get("steering_score", 0))
-
-        if radius < 100:
-            speed_factor = max(0.5, radius / 100)
-            speed = int(speed * speed_factor)
-
-        if steering_score > 0.3:
-            speed_factor = max(0.6, 1 - steering_score * 0.5)
-            speed = int(speed * speed_factor)
-
-        if confidence < 0.7:
-            speed = int(speed * confidence)
-
-        speed = max(self.min_speed, min(self.max_speed, speed))
-        return speed
 
     def _set_command(self, command: Command, info: dict):
         """Override để thêm statistics và smoothing."""
@@ -558,6 +527,97 @@ class CarControlAdvanced(CarControl):
 
         return new_command
 
+    # detect sign
+    def _control_loop(self):
+        """Vòng lặp điều khiển chính đã được nâng cấp"""
+        while self._running:
+            try:
+                # 1. Lấy dữ liệu
+                is_paused = self.is_paused()
+                frame = self.stream_manager.get_latest_frame()
+
+                if frame is None:
+                    time.sleep(0.01)
+                    continue
+
+                # 2. Xử lý Làn đường (Luôn chạy để tính góc lái)
+                processed_frame, lane_info = self.lane_nav.process_frame(frame, debug=self.enable_display)
+                if self.enable_display:
+                    self.latest_processed_frame = processed_frame
+
+                # Nếu đang pause thủ công thì bỏ qua logic dưới
+                if is_paused:
+                    with self._lock:
+                        self._current_info = lane_info
+                    continue
+
+                # Lấy biển báo mới nhất từ luồng YOLO
+                # 3. LOGIC HỢP NHẤT: BIỂN BÁO + LÀN ĐƯỜNG
+                # ====================================================
+
+                current_sign = None
+                if self.sign_detector:
+                    current_sign = self.sign_detector.get_current_sign()
+
+                # --- RESET KHI KHÔNG CÒN THẤY BIỂN NÀO ---
+                if current_sign is None:
+                    # Không còn thấy biển báo -> bỏ chế độ STOP do biển
+                    self.force_stop_by_sign = False
+
+                # --- XỬ LÝ TRẠNG THÁI TỪ BIỂN BÁO KHI CÓ current_sign ---
+                else:
+                    # Case 1: Gặp biển/đèn dừng (STOP, RED)
+                    if current_sign in self.sign_detector.STOP_LABELS:
+                        self.force_stop_by_sign = True
+                        print(f"[SIGN] PHÁT HIỆN: {current_sign} -> DỪNG XE")
+
+                    # Case 2: Gặp đèn xanh / biển CHO ĐI
+                    elif current_sign in self.sign_detector.GO_LABELS:
+                        self.force_stop_by_sign = False
+                        print(f"[SIGN] PHÁT HIỆN: {current_sign} -> ĐI TIẾP")
+
+                    # Case 3: Gặp biển TỐC ĐỘ
+                    # elif current_sign in self.sign_detector.SPEED_LABELS:
+                    #     self.override_speed = 110
+                    #     # (Tuỳ bạn có dùng override_speed hay không)
+                    #     print(f"[SIGN] PHÁT HIỆN: {current_sign} -> SET TỐC ĐỘ 110")
+
+                    # Case 4: Biển khác (TURN LEFT/RIGHT, WARNING, …)
+                    else:
+                        # Ở đây mình cũng bỏ chế độ STOP, tuỳ ý bạn
+                        self.force_stop_by_sign = False
+
+                # --- RA QUYẾT ĐỊNH CUỐI CÙNG ---
+                if self.force_stop_by_sign:
+                    # Ưu tiên cao nhất: Dừng do biển báo
+                    final_command = Command.STOP
+                    lane_info['warning'] = f"STOP BY SIGN"
+                else:
+                    # Không bị dừng -> Lái theo làn đường
+                    final_command = self._process_lane_info(lane_info)
+
+                # Cập nhật lệnh xuống ESP32/Database
+                self._set_command_with_sign_logic(final_command, self.speed, lane_info)
+
+                # ====================================================
+                time.sleep(0.02)
+
+
+            except Exception as e:
+                print(f"Error: {e}")
+                time.sleep(0.1)
+
+    def _set_command_with_sign_logic(self, command, speed, info):
+        """Hàm cập nhật lệnh thay thế cho _set_command cũ để hỗ trợ speed tùy chỉnh"""
+        # Logic smoothing lệnh giữ nguyên...
+        smoothed_command = self._smooth_command(command)
+
+        with self._lock:
+            self._current_command = smoothed_command
+            self.speed = speed  # Cập nhật tốc độ thực tế sẽ gửi đi
+            self._current_info = info
+            self._last_update_time = time.time()
+
 
 # ========================================================
 # VÍ DỤ SỬ DỤNG
@@ -566,11 +626,11 @@ class CarControlAdvanced(CarControl):
 def main():
     """Ví dụ sử dụng CarControl với pause/resume."""
     from stream_manager import stream_manager
-    # from lane_navigator import LaneNavigator
-    from main1 import lane_nav
+    from lane_navigator import LaneNavigator
     # 1. Khởi tạo
     stream_manager.start()
 
+    lane_nav = LaneNavigator()
     lane_nav.load_config("lane_nav_config.json")
 
     # 2. Tạo CarControl
@@ -691,7 +751,6 @@ if __name__ == "__main__":
     main()
 
 from .stream_manager import stream_manager
-# from .lane_navigator import lane_nav
-from .main1 import lane_nav
+from .lane_navigator import lane_nav
 
 car_control = CarControlAdvanced(stream_manager, lane_nav, base_speed=110, min_speed=100, max_speed=255)

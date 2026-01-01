@@ -1,95 +1,191 @@
 <!DOCTYPE html>
 <html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Điều khiển xe</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background-color: #f0f0f0;
-        }
+      body {
+        font-family: Arial, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        margin: 0;
+        background-color: #f0f0f0;
+      }
 
-        .container {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-            text-align: center;
-        }
+      .container {
+        background: white;
+        padding: 24px;
+        border-radius: 10px;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+        max-width: 1200px;
+        width: 100%;
+      }
 
-        .controls {
-            display: grid;
-            grid-template-columns: repeat(3, 100px);
-            gap: 10px;
-            margin: 20px auto;
-            width: fit-content;
-        }
+      h1 {
+        margin-top: 0;
+        margin-bottom: 12px;
+        text-align: center;
+      }
 
-        button {
-            padding: 20px;
-            font-size: 18px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            background-color: #4CAF50;
-            color: white;
-            transition: all 0.3s;
-        }
+      .main-layout {
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+      }
 
-        button:hover {
-            background-color: #45a049;
-            transform: scale(1.05);
-        }
+      .left-panel {
+        flex: 2;
+      }
 
-        button:active {
-            transform: scale(0.95);
-        }
+      .right-panel {
+        flex: 1.2;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
 
-        .stop {
-            background-color: #f44336;
-        }
+      .panel-box {
+        background: #fafafa;
+        border-radius: 8px;
+        border: 1px solid #ddd;
+        padding: 10px 12px;
+      }
 
-        .stop:hover {
-            background-color: #da190b;
-        }
+      .panel-box h2 {
+        margin: 0 0 8px 0;
+        font-size: 16px;
+      }
 
-        .empty {
-            visibility: hidden;
-        }
+      .panel-box h3 {
+        margin: 8px 0 4px 0;
+        font-size: 14px;
+      }
 
-        .speed-control {
-            margin: 20px 0;
-        }
+      .camera-view {
+        margin-top: 4px;
+      }
 
-        input[type="range"] {
-            width: 200px;
-        }
+      #camera-stream {
+        width: 100%;
+        max-width: 640px;
+        height: auto;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        display: block;
+      }
 
-        .status {
-            margin-top: 20px;
-            padding: 10px;
-            background-color: #e7f3ff;
-            border-radius: 5px;
-        }
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin: 10px auto 10px;
+        width: 100%;
+      }
 
-        .camera-view {
-            margin-top: 20px;
-        }
+      button {
+        padding: 12px;
+        font-size: 16px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        background-color: #4caf50;
+        color: white;
+        transition: all 0.2s;
+      }
 
-        #camera-stream {
-            width: 100%;
-            max-width: 640px;
-            height: auto;
-            border: 2px solid #ddd;
-            border-radius: 5px;
+      button:hover {
+        background-color: #45a049;
+        transform: scale(1.03);
+      }
+
+      button:active {
+        transform: scale(0.96);
+      }
+
+      .stop {
+        background-color: #f44336;
+      }
+
+      .stop:hover {
+        background-color: #da190b;
+      }
+
+      .empty {
+        visibility: hidden;
+      }
+
+      .speed-control {
+        margin: 8px 0 6px;
+        font-size: 14px;
+      }
+
+      input[type="range"] {
+        width: 100%;
+      }
+
+      .status {
+        margin-top: 6px;
+        padding: 6px 8px;
+        font-size: 13px;
+        background-color: #e7f3ff;
+        border-radius: 5px;
+      }
+
+      #analysis-status {
+        background-color: #fffbe7;
+      }
+
+      .log-row {
+        font-size: 13px;
+        margin-bottom: 4px;
+      }
+
+      .lane-log-container {
+        margin-top: 8px;
+        max-height: 180px; /* chiều cao cố định cho vùng log */
+        overflow-y: auto; /* scroll dọc khi dài quá */
+        background: #ffffff;
+        border-radius: 4px;
+        border: 1px solid #eee;
+        padding: 6px 8px;
+      }
+
+      .lane-log-line {
+        font-size: 12px;
+        color: #333;
+        margin-bottom: 2px;
+        white-space: nowrap;
+      }
+
+      .log-label {
+        font-weight: bold;
+      }
+
+      .log-small {
+        font-size: 12px;
+        color: #555;
+      }
+
+      #sign-list {
+        margin: 4px 0 0 16px;
+        padding: 0;
+        font-size: 13px;
+      }
+
+      #sign-list li {
+        margin-bottom: 2px;
+      }
+
+      @media (max-width: 900px) {
+        .main-layout {
+          flex-direction: column;
         }
+      }
     </style>
+<<<<<<< HEAD
 </head>
 <body>
 <div class="container">
@@ -98,174 +194,310 @@
         <h2>Camera View</h2>
 
         <img alt="" src="http://10.251.5.144:8000/api/stream-live-feed/" width="640" height="480"/>
+=======
+  </head>
+  <body>
+    <div class="container">
+      <h1>Điều khiển xe</h1>
+
+      <div class="main-layout">
+        <!-- BÊN TRÁI: FRAME -->
+        <div class="left-panel">
+          <div class="camera-view">
+            <h2>Camera / Lane view</h2>
+            <img
+              id="camera-stream"
+              src="/api/stream-live-feed/"
+              alt="Camera stream"
+            />
+          </div>
+        </div>
+
+        <!-- BÊN PHẢI: LOG + ĐIỀU KHIỂN -->
+        <div class="right-panel">
+          <!-- BOX 1: LOG LANE + SIGN -->
+          <div class="panel-box">
+            <h2>Log điều khiển & biển báo</h2>
+
+            <h3>Lane / Command</h3>
+            <div class="log-row">
+              <span class="log-label">CMD:</span>
+              <span id="lane-command">--</span>
+            </div>
+            <div class="log-row">
+              <span class="log-label">Action:</span>
+              <span id="lane-action">--</span>
+            </div>
+            <div class="log-row">
+              <span class="log-label">Steering:</span>
+              <span id="lane-score">--</span>
+            </div>
+            <div class="log-row">
+              <span class="log-label">Offset:</span>
+              <span id="lane-offset">--</span>
+            </div>
+            <div class="log-row">
+              <span class="log-label">Góc làn:</span>
+              <span id="lane-angle">--</span>
+            </div>
+            <div class="log-row">
+              <span class="log-label">Confidence:</span>
+              <span id="lane-confidence">--</span>
+            </div>
+            <div class="log-row">
+              <span class="log-label">Cảnh báo:</span>
+              <span id="lane-warning">--</span>
+            </div>
+            <div class="log-small" id="lane-state">
+              STATE: -- | FPS: -- | Frames: --
+            </div>
+            <div class="log-small">
+              Biển báo (CarControl): <span id="lane-sign-from-control">--</span>
+            </div>
+
+            <h3>Lịch sử lệnh (phiên hiện tại)</h3>
+            <div class="lane-log-container" id="lane-log-container">
+              <div id="lane-log-history"></div>
+            </div>
+
+            <hr />
+          </div>
+
+          <!-- BOX 2: ĐIỀU KHIỂN -->
+          <div class="panel-box">
+            <h2>Điều khiển</h2>
+
+            <div class="controls">
+              <button class="empty"></button>
+              <button onclick="sendCommand('forward')">⬆️ Tiến</button>
+              <button class="empty"></button>
+
+              <button onclick="sendCommand('left')">⬅️ Trái</button>
+              <button class="stop" onclick="sendCommand('stop')">
+                ⏹️ Dừng
+              </button>
+              <button onclick="sendCommand('right')">➡️ Phải</button>
+
+              <button class="empty"></button>
+              <button onclick="sendCommand('backward')">⬇️ Lùi</button>
+              <button class="empty"></button>
+            </div>
+
+            <div class="speed-control">
+              <label for="speed">Tốc độ: <span id="speedValue">90</span></label
+              ><br />
+              <input
+                type="range"
+                id="speed"
+                min="0"
+                max="255"
+                value="90"
+                oninput="updateSpeed(this.value)"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+>>>>>>> 83c98cd948c1a5a1e9658ada8d23194e0d3aa30c
     </div>
 
-    <div class="controls">
-        <button class="empty"></button>
-        <button onclick="sendCommand('forward')">⬆️ Tiến</button>
-        <button class="empty"></button>
+    <script>
+      let currentSpeed = 90;
 
-        <button onclick="sendCommand('left')">⬅️ Trái</button>
-        <button class="stop" onclick="sendCommand('stop')">⏹️ Dừng</button>
-        <button onclick="sendCommand('right')">➡️ Phải</button>
-
-        <button class="empty"></button>
-        <button onclick="sendCommand('backward')">⬇️ Lùi</button>
-        <button class="empty"></button>
-
-        <button id="btn-auto" style="background-color: #ff9800;" onclick="toggleAutoDetect()">🔄 Detect: OFF</button>
-
-    </div>
-
-    <div class="speed-control">
-        <label for="speed">Tốc độ: <span id="speedValue">110</span></label><br>
-        <input type="range" id="speed" min="0" max="255" value="110"
-               oninput="updateSpeed(this.value)">
-    </div>
-
-    <div class="status" id="status">
-        Trạng thái: Đang chờ lệnh...
-    </div>
-
-    <div class="status" id="analysis-status" style="background-color: #fffbe7; margin-top: 10px;">
-        Phân tích: Đang chờ...
-    </div>
-</div>
-
-<script>
-    let currentSpeed = 110;
-    let autoDetectInterval = null;
-
-    function updateSpeed(value) {
+      function updateSpeed(value) {
         currentSpeed = parseInt(value);
-        document.getElementById('speedValue').textContent = currentSpeed;
-    }
+        document.getElementById("speedValue").textContent = currentSpeed;
+      }
 
-    async function sendCommand(command) {
+      async function sendCommand(command) {
         try {
-            const response = await fetch('/api/set-command/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    command: command,
-                    speed: currentSpeed
-                })
-            });
+          const response = await fetch("/api/set-command/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              command: command,
+              speed: currentSpeed,
+            }),
+          });
 
-            const data = await response.json();
+          const data = await response.json();
 
-            if (data.status === 'success') {
-                document.getElementById('status').textContent =
-                    `Trạng thái: ${command.toUpperCase()} - Tốc độ: ${currentSpeed} - Dynamic mode: ${data.dynamic_speed_mode ? 'ON' : 'OFF'}`;
-            }
+          if (data.status === "success") {
+            document.getElementById(
+              "status"
+            ).textContent = `Trạng thái: ${command.toUpperCase()} - Tốc độ: ${currentSpeed}`;
+          }
         } catch (error) {
-            console.error('Error:', error);
-            document.getElementById('status').textContent =
-                'Lỗi: Không thể gửi lệnh';
+          console.error("Error:", error);
+          document.getElementById("status").textContent =
+            "Lỗi: Không thể gửi lệnh";
         }
-    }
+      }
 
-    function toggleAutoDetect() {
-        const btn = document.getElementById('btn-auto');
-
-        if (autoDetectInterval) {
-            clearInterval(autoDetectInterval);
-            autoDetectInterval = null;
-            btn.textContent = "🔄 Detect: OFF";
-            btn.style.backgroundColor = "#ff9800";
-            document.getElementById('analysis-status').textContent = "Đã dừng tự động.";
-        } else {
-            runAnalysisTest();
-            autoDetectInterval = setInterval(runAnalysisTest, 1000);
-
-            btn.textContent = "🔄 Detect: ON";
-            btn.style.backgroundColor = "#2196F3";
-        }
-    }
-
-    async function runAnalysisTest() {
-        const analysisDiv = document.getElementById('analysis-status');
-
-        if (!autoDetectInterval) {
-            analysisDiv.textContent = "Đang gửi yêu cầu...";
-        }
-
+      // Gọi YOLO trên frame hiện tại
+      async function runAnalyzeOnce() {
         try {
-            const response = await fetch('/api/analyze-stream/');
-        } catch (error) {
-            console.error('Lỗi khi gọi phân tích:', error);
+          const res = await fetch("/api/analyze-stream/");
+          await res.json(); // kết quả sẽ được lưu vào last_analysis_result
+        } catch (e) {
+          console.error("analyze-stream error", e);
         }
-    }
+      }
 
-    // Điều khiển bằng bàn phím
-    document.addEventListener('keydown', (event) => {
+      function resetLaneLog() {
+        const historyEl = document.getElementById("lane-log-history");
+        if (historyEl) {
+          historyEl.innerHTML = "";
+        }
+      }
+
+      // ➕ Thêm một dòng mới vào lịch sử log
+      function appendLaneLog(data) {
+        const historyEl = document.getElementById("lane-log-history");
+        const container = document.getElementById("lane-log-container");
+        if (!historyEl || !container) return;
+
+        const info = data.info || {};
+        const raw = info.raw_data || {};
+        const laneSt = info.lane_status || {};
+
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString("vi-VN");
+
+        const cmd = (data.command || "--").toUpperCase();
+        const action = info.action || "--";
+        const steering =
+          info.steering_score != null ? info.steering_score.toFixed(2) : "--";
+        const offset = raw.offset_m != null ? raw.offset_m.toFixed(2) : "--";
+        const angle = raw.lane_angle != null ? raw.lane_angle.toFixed(1) : "--";
+        const warn = laneSt.warning || info.warning || "";
+
+        const line = document.createElement("div");
+        line.className = "lane-log-line";
+        line.textContent =
+          `[${timeStr}] CMD=${cmd}` +
+          ` | act=${action}` +
+          ` | steer=${steering}` +
+          ` | off=${offset}` +
+          ` | angle=${angle}` +
+          (warn ? ` | warn=${warn}` : "");
+
+        historyEl.appendChild(line);
+
+        // Giới hạn số dòng (ví dụ 200 dòng gần nhất)
+        if (historyEl.children.length > 200) {
+          historyEl.removeChild(historyEl.firstChild);
+        }
+
+        // Auto scroll xuống cuối
+        container.scrollTop = container.scrollHeight;
+      }
+
+      // Lấy info điều khiển từ CarControl (command detect làn, offset, góc, ...)
+      async function fetchControlInfo() {
+        try {
+          const res = await fetch("/api/control-info/");
+          if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+          }
+          const data = await res.json();
+
+          // command + state
+          document.getElementById("lane-command").textContent = `${(
+            data.command || "--"
+          ).toUpperCase()} @ ${data.speed ?? 0}`;
+          document.getElementById("lane-state").textContent = `STATE: ${(
+            data.state || "--"
+          ).toUpperCase()} | FPS: ${data.fps ?? "--"} | Frames: ${
+            data.frame_count ?? "--"
+          }`;
+
+          const info = data.info || {};
+          const raw = info.raw_data || {};
+          const laneSt = info.lane_status || {};
+
+          document.getElementById("lane-action").textContent =
+            info.action || "--";
+
+          const steering =
+            info.steering_score !== undefined && info.steering_score !== null
+              ? info.steering_score.toFixed(2)
+              : "--";
+          document.getElementById("lane-score").textContent = steering;
+
+          const offset =
+            raw.offset_m !== undefined && raw.offset_m !== null
+              ? raw.offset_m.toFixed(2) + " m"
+              : "--";
+          document.getElementById("lane-offset").textContent = offset;
+
+          const angle =
+            raw.lane_angle !== undefined && raw.lane_angle !== null
+              ? raw.lane_angle.toFixed(1) + "°"
+              : "--";
+          document.getElementById("lane-angle").textContent = angle;
+
+          const conf =
+            laneSt.confidence !== undefined && laneSt.confidence !== null
+              ? Math.round(laneSt.confidence * 100) + "%"
+              : "--";
+          document.getElementById("lane-confidence").textContent = conf;
+
+          const warning = laneSt.warning || info.warning || "--";
+          document.getElementById("lane-warning").textContent = warning;
+
+          const signFromControl = data.current_sign || "Không có";
+          document.getElementById("lane-sign-from-control").textContent =
+            signFromControl;
+
+          const state = (data.state || "").toLowerCase();
+          if (state === "running") {
+            appendLaneLog(data);
+          }
+        } catch (e) {
+          console.error("fetchControlInfo error:", e);
+        }
+      }
+
+      // Điều khiển bằng bàn phím: WASD + Space
+      document.addEventListener("keydown", (event) => {
         switch (event.key) {
-            {#case 'ArrowUp':#}
-            case 'w':
-            case 'W':
-                sendCommand('forward');
-                break;
-            {#case 'ArrowDown':#}
-            case 's':
-            case 'S':
-                sendCommand('backward');
-                break;
-            {#case 'ArrowLeft':#}
-            case 'a':
-            case 'A':
-                sendCommand('left');
-                break;
-            {#case 'ArrowRight':#}
-            case 'd':
-            case 'D':
-                sendCommand('right');
-                break;
-            case ' ':
-                sendCommand('stop');
-                break;
+          case "w":
+          case "W":
+            sendCommand("forward");
+            break;
+          case "s":
+          case "S":
+            sendCommand("backward");
+            break;
+          case "a":
+          case "A":
+            sendCommand("left");
+            break;
+          case "d":
+          case "D":
+            sendCommand("right");
+            break;
+          case " ":
+            sendCommand("stop");
+            break;
         }
-    });
-    // const esp32IP = prompt("Nhập IP của ESP32-CAM:");
-    // if (esp32IP) {
-    //     document.getElementById('camera-stream').src = esp32IP;
-    // }
+      });
 
-    function updateAnalysisDisplay(data) {
-        const analysisDiv = document.getElementById('analysis-status');
+      // Lần đầu vào trang: reset log + chạy YOLO 1 lần
+      resetLaneLog();
+      runAnalyzeOnce();
 
-        if (data.status === 'success' && data.detections.length > 0) {
-            let firstSign = data.detections[0];
-            let confidencePercent = (firstSign.do_tin_cay * 100).toFixed(0);
+      // Gọi YOLO định kỳ để luôn cập nhật last_analysis_result
+      setInterval(runAnalyzeOnce, 1500);
 
-            analysisDiv.textContent =
-                `Phát hiện: ${firstSign.bien_bao} (${confidencePercent}%)`;
-            analysisDiv.style.backgroundColor = "#dcedc8";
-
-        } else if (data.status === 'no_detection') {
-            analysisDiv.textContent = "Phân tích: Không thấy biển báo.";
-            analysisDiv.style.backgroundColor = "#fffbe7";
-
-        } else if (data.status === 'error') {
-            analysisDiv.textContent = "Lỗi phân tích: " + data.error_msg;
-            analysisDiv.style.backgroundColor = "#ffcdd2";
-        }
-    }
-
-    async function fetchAnalysisResult() {
-        try {
-            const response = await fetch('/api/get-analysis/');
-            const data = await response.json();
-            updateAnalysisDisplay(data);
-
-        } catch (error) {
-            console.error('Lỗi khi lấy kết quả phân tích:', error);
-            document.getElementById('analysis-status').textContent = 'Lỗi kết nối phân tích.';
-        }
-    }
-
-    setInterval(fetchAnalysisResult, 1000);
-</script>
-</body>
+      // Poll liên tục log lane + kết quả YOLO
+      setInterval(() => {
+        fetchControlInfo();
+        fetchAnalysisResult();
+      }, 1000);
+    </script>
+  </body>
 </html>

@@ -5,325 +5,132 @@ import json
 
 class LaneNavigator:
     def __init__(self):
-        # === ROI & BEV ===
         self.roi_points = []
         self.bev_src_points = None
         self.bev_dst_points = None
         self.M = None
         self.Minv = None
 
-        # === FLAGS ===
-        self.config_loaded = False
-        self.use_auto_roi = False
+        # Thông số kỹ thuật (override cho track giấy 20cm, cam thấp ~13–15cm)
+        # (ước lượng: ROI cao ~1/3 ảnh ~160 px)
+        self.ym_per_pix = 0.20 / 160.0  # ~0.00125 m/pixel dọc
+        self.xm_per_pix = 0.20 / 130.0  # lane 20cm ~130 px trong BEV
 
-        # === THÔNG SỐ KỸ THUẬT ===
-        self.ym_per_pix = 0.20 / 160.0  # m/pixel dọc
-        self.xm_per_pix = 0.20 / 130.0  # m/pixel ngang
+        # Thông số điều khiển - GIẢM NHẠY để xe ổn định hơn
+        self.k_offset = 0.25  # trước là 1.0
+        self.k_angle = 0.6  # giữ
+        self.k_curvature = 0.1  # trước là 0.5
 
-        # === THÔNG SỐ ĐIỀU KHIỂN ===
-        self.k_offset = 0.4
-        self.k_angle = 0.8
-        self.k_curvature = 0.2
-
-        self.steering_threshold = 0.2
+        self.steering_threshold = 0.2  # trước 0.35
         self.sharp_turn_threshold = 0.5
 
         self.prev_steering_score = 0
-        self.smoothing_factor = 0.8
+        self.smoothing_factor = 0.5  # trước 0.3 => mượt hơn
 
-        # === THÔNG SỐ LÀN ĐƯỜNG ===
-        self.standard_lane_width_pixels = 130
+        # ===== THÔNG SỐ MỚI CHO XỬ LÝ 1 LÀN =====
+        # Track giấy: đường rộng 20cm, trong BEV ~120–140 px
+        self.standard_lane_width_pixels = 130  # trước 500, quá to
         self.lane_width_history = []
         self.max_history = 30
 
+        # Lưu lại fit trước đó
         self.prev_left_fit = None
         self.prev_right_fit = None
         self.frames_since_both_lanes = 0
         self.max_frames_without_both = 15
-        self.min_lane_points = 50
 
-        # === THÔNG SỐ TIỀN XỬ LÝ ===
-        self.sobel_thresh_min = 20
-        self.sobel_thresh_max = 150
-        self.lightness_thresh = 60  # Ngưỡng L cho vạch đen
-
-        # === CROP INFO (tính từ ROI) ===
-        self.crop_rect = None  # (x, y, w, h)
-
-    # ================================================================
-    # =============== LOAD / SAVE CONFIG =============================
-    # ================================================================
+        # Track nhỏ -> hạ ngưỡng điểm tối thiểu
+        self.min_lane_points = 50  # trước 100
 
     def load_config(self, filepath="lane_nav_config.json"):
-        """Load toàn bộ cấu hình từ file JSON."""
-        try:
-            with open(filepath, "r") as f:
-                data = json.load(f)
+        with open(filepath, "r") as f:
+            data = json.load(f)
+            self.roi_points = data["roi_points"]
+            self.bev_src_points = np.array(data["bev_src_points"], dtype=np.float32)
+            self.bev_dst_points = np.array(data["bev_dst_points"], dtype=np.float32)
+            self.M = np.array(data["M"], dtype=np.float32)
+            self.Minv = np.array(data["Minv"], dtype=np.float32)
+            self.standard_lane_width_pixels = data["standard_lane_width_pixels"]
+            # Load lane width nếu có
 
-            # === ROI & BEV ===
-            if "roi_points" in data:
-                self.roi_points = data["roi_points"]
-            if "bev_src_points" in data:
-                self.bev_src_points = np.array(data["bev_src_points"], dtype=np.float32)
-            if "bev_dst_points" in data:
-                self.bev_dst_points = np.array(data["bev_dst_points"], dtype=np.float32)
-            if "M" in data:
-                self.M = np.array(data["M"], dtype=np.float32)
-            if "Minv" in data:
-                self.Minv = np.array(data["Minv"], dtype=np.float32)
-            if "crop_rect" in data:
-                self.crop_rect = tuple(data["crop_rect"]) if data["crop_rect"] else None
+            if "standard_lane_width" in data:
+                self.standard_lane_width_pixels = data["standard_lane_width"]
+        print("Cấu hình đã được tải từ", filepath)
 
-            # === THÔNG SỐ KỸ THUẬT ===
-            if "ym_per_pix" in data:
-                self.ym_per_pix = data["ym_per_pix"]
-            if "xm_per_pix" in data:
-                self.xm_per_pix = data["xm_per_pix"]
-
-            # === THÔNG SỐ ĐIỀU KHIỂN ===
-            if "k_offset" in data:
-                self.k_offset = data["k_offset"]
-            if "k_angle" in data:
-                self.k_angle = data["k_angle"]
-            if "k_curvature" in data:
-                self.k_curvature = data["k_curvature"]
-            if "steering_threshold" in data:
-                self.steering_threshold = data["steering_threshold"]
-            if "sharp_turn_threshold" in data:
-                self.sharp_turn_threshold = data["sharp_turn_threshold"]
-            if "smoothing_factor" in data:
-                self.smoothing_factor = data["smoothing_factor"]
-
-            # === THÔNG SỐ LÀN ĐƯỜNG ===
-            if "standard_lane_width_pixels" in data:
-                self.standard_lane_width_pixels = data["standard_lane_width_pixels"]
-            if "max_history" in data:
-                self.max_history = data["max_history"]
-            if "max_frames_without_both" in data:
-                self.max_frames_without_both = data["max_frames_without_both"]
-            if "min_lane_points" in data:
-                self.min_lane_points = data["min_lane_points"]
-
-            # === THÔNG SỐ TIỀN XỬ LÝ ===
-            if "sobel_thresh_min" in data:
-                self.sobel_thresh_min = data["sobel_thresh_min"]
-            if "sobel_thresh_max" in data:
-                self.sobel_thresh_max = data["sobel_thresh_max"]
-            if "lightness_thresh" in data:
-                self.lightness_thresh = data["lightness_thresh"]
-
-            self.config_loaded = True
-            self.use_auto_roi = False
-
-            print(f"✓ Cấu hình đã được tải từ {filepath}")
-            self._print_config_summary()
-            return True
-
-        except FileNotFoundError:
-            print(f"✗ Không tìm thấy file {filepath}")
-            return False
-        except Exception as e:
-            print(f"✗ Lỗi khi load config: {e}")
-            return False
-
-    def save_config(self, filepath="lane_nav_config.json"):
-        """Lưu toàn bộ cấu hình vào file JSON."""
-        if not self.roi_points:
-            print("✗ Chưa có ROI để lưu!")
-            return False
-
-        config_data = {
-            # === ROI & BEV ===
-            "roi_points": self.roi_points if isinstance(self.roi_points, list) else self.roi_points.tolist(),
-            "bev_src_points": self.bev_src_points.tolist() if self.bev_src_points is not None else None,
-            "bev_dst_points": self.bev_dst_points.tolist() if self.bev_dst_points is not None else None,
-            "M": self.M.tolist() if self.M is not None else None,
-            "Minv": self.Minv.tolist() if self.Minv is not None else None,
-            "crop_rect": list(self.crop_rect) if self.crop_rect else None,
-
-            # === THÔNG SỐ KỸ THUẬT ===
-            "ym_per_pix": self.ym_per_pix,
-            "xm_per_pix": self.xm_per_pix,
-
-            # === THÔNG SỐ ĐIỀU KHIỂN ===
-            "k_offset": self.k_offset,
-            "k_angle": self.k_angle,
-            "k_curvature": self.k_curvature,
-            "steering_threshold": self.steering_threshold,
-            "sharp_turn_threshold": self.sharp_turn_threshold,
-            "smoothing_factor": self.smoothing_factor,
-
-            # === THÔNG SỐ LÀN ĐƯỜNG ===
+    def save_config(self):
+        json_str = json.dumps({
+            "roi_points": self.roi_points,
+            "bev_src_points": self.bev_src_points.tolist(),
+            "bev_dst_points": self.bev_dst_points.tolist(),
+            "M": self.M.tolist(),
+            "Minv": self.Minv.tolist(),
+            # "ym_per_pix": self.ym_per_pix,
+            # "xm_per_pix": self.xm_per_pix,
+            # "k_offset": self.k_offset,
+            # "k_angle": self.k_angle,
+            # "k_curvature": self.k_curvature,
+            # "steering_threshold": self.steering_threshold,
             "standard_lane_width_pixels": self.standard_lane_width_pixels,
-            "max_history": self.max_history,
-            "max_frames_without_both": self.max_frames_without_both,
-            "min_lane_points": self.min_lane_points,
+            "standard_lane_width": self.standard_lane_width_pixels
+        })
+        with open("lane_nav_config.json", "w") as f:
+            f.write(json_str)
+        print("Cấu hình đã được lưu vào lane_nav_config.json")
 
-            # === THÔNG SỐ TIỀN XỬ LÝ ===
-            "sobel_thresh_min": self.sobel_thresh_min,
-            "sobel_thresh_max": self.sobel_thresh_max,
-            "lightness_thresh": self.lightness_thresh,
-        }
-
-        with open(filepath, "w") as f:
-            json.dump(config_data, f, indent=2)
-
-        print(f"✓ Cấu hình đã được lưu vào {filepath}")
-        return True
-
-    def _print_config_summary(self):
-        """In tóm tắt cấu hình hiện tại."""
-        print("  --- Tóm tắt Config ---")
-        print(f"  ROI: {len(self.roi_points)} điểm")
-        print(f"  Crop: {self.crop_rect}")
-        print(f"  Control: k_off={self.k_offset}, k_ang={self.k_angle}, k_curv={self.k_curvature}")
-        print(f"  Thresholds: steer={self.steering_threshold}, sharp={self.sharp_turn_threshold}")
-        print(f"  Lane width: {self.standard_lane_width_pixels}px")
-        print(
-            f"  Preprocess: sobel=[{self.sobel_thresh_min},{self.sobel_thresh_max}], L_thresh={self.lightness_thresh}")
-        print("  ----------------------")
-
-    # ================================================================
-    # =============== CẤU HÌNH ROI ===================================
-    # ================================================================
-
-    def select_points_interactive(self, frame, save_path="lane_nav_config.json"):
-        """Mở cửa sổ để người dùng click chọn 4 điểm ROI."""
-        print("\n" + "=" * 50)
-        print("HƯỚNG DẪN CHỌN ROI:")
-        print("  1. Click điểm Dưới-Trái")
-        print("  2. Click điểm Dưới-Phải")
-        print("  3. Click điểm Trên-Phải")
-        print("  4. Click điểm Trên-Trái")
-        print("  ESC: Hủy | R: Reset | ENTER: Xác nhận")
-        print("=" * 50 + "\n")
+    def select_points_interactive(self, frame):
+        """Hàm mở cửa sổ để người dùng click chọn 4 điểm ROI/BEV."""
+        print("HƯỚNG DẪN: Click 4 điểm theo thứ tự:\n1. Dưới-Trái\n2. Dưới-Phải\n3. Trên-Phải\n4. Trên-Trái")
 
         temp_img = frame.copy()
-        points = []
+        self.roi_points = []
 
         def mouse_callback(event, x, y, flags, param):
-            nonlocal temp_img, points
-
             if event == cv2.EVENT_LBUTTONDOWN:
-                if len(points) < 4:
-                    points.append((x, y))
-                    cv2.circle(temp_img, (x, y), 6, (0, 0, 255), -1)
-                    cv2.putText(temp_img, str(len(points)), (x + 10, y - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-                    if len(points) > 1:
-                        cv2.line(temp_img, points[-2], points[-1], (0, 255, 0), 2)
-                    if len(points) == 4:
-                        cv2.line(temp_img, points[-1], points[0], (0, 255, 0), 2)
-                        overlay = temp_img.copy()
-                        cv2.fillPoly(overlay, [np.array(points)], (0, 255, 0))
-                        cv2.addWeighted(overlay, 0.3, temp_img, 0.7, 0, temp_img)
-
+                if len(self.roi_points) < 4:
+                    self.roi_points.append((x, y))
+                    cv2.circle(temp_img, (x, y), 5, (0, 0, 255), -1)
+                    if len(self.roi_points) > 1:
+                        cv2.line(temp_img, self.roi_points[-2], self.roi_points[-1], (0, 255, 0), 2)
+                    if len(self.roi_points) == 4:
+                        cv2.line(temp_img, self.roi_points[-1], self.roi_points[0], (0, 255, 0), 2)
                     cv2.imshow("Config ROI", temp_img)
 
         cv2.namedWindow("Config ROI")
         cv2.setMouseCallback("Config ROI", mouse_callback)
         cv2.imshow("Config ROI", temp_img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
-        while True:
-            key = cv2.waitKey(1) & 0xFF
+        if len(self.roi_points) != 4:
+            raise Exception("Bạn chưa chọn đủ 4 điểm!")
 
-            if key == 27:
-                cv2.destroyWindow("Config ROI")
-                print("✗ Đã hủy chọn ROI")
-                return False
-
-            elif key == ord('r'):
-                temp_img = frame.copy()
-                points = []
-                cv2.imshow("Config ROI", temp_img)
-                print("  Reset - chọn lại từ đầu")
-
-            elif key == 13 or key == 10:
-                if len(points) == 4:
-                    break
-                else:
-                    print(f"  Cần chọn đủ 4 điểm (hiện có {len(points)})")
-
-        cv2.destroyWindow("Config ROI")
-
-        if len(points) != 4:
-            print("✗ Chưa chọn đủ 4 điểm!")
-            return False
-
-        # Thiết lập ROI
-        self._setup_roi_from_points(points, frame.shape)
-
-        self.config_loaded = True
-        self.use_auto_roi = False
-
-        print(f"✓ Cấu hình ROI hoàn tất!")
-        self._print_config_summary()
-
-        self.save_config(save_path)
-        return True
-
-    def set_roi_programmatically(self, roi_points, frame_shape):
-        """Đặt ROI bằng code."""
-        if len(roi_points) != 4:
-            raise ValueError("Cần đúng 4 điểm ROI!")
-
-        self._setup_roi_from_points(list(roi_points), frame_shape)
-
-        self.config_loaded = True
-        self.use_auto_roi = False
-
-        print(f"✓ ROI đã được đặt: {roi_points}")
-
-    def _setup_roi_from_points(self, points, frame_shape):
-        """Thiết lập ROI, BEV transform và crop rect từ các điểm."""
-        h, w = frame_shape[:2]
-
-        self.roi_points = points
-        self.bev_src_points = np.float32(points)
-
-        # Tính crop rectangle từ ROI polygon
-        pts_array = np.array(points)
-        x_min = max(0, int(np.min(pts_array[:, 0])))
-        x_max = min(w, int(np.max(pts_array[:, 0])))
-        y_min = max(0, int(np.min(pts_array[:, 1])))
-        y_max = min(h, int(np.max(pts_array[:, 1])))
-
-        self.crop_rect = (x_min, y_min, x_max - x_min, y_max - y_min)
-
-        # BEV destination
+        h, w = frame.shape[:2]
+        self.bev_src_points = np.float32(self.roi_points)
         offset = 100
         self.bev_dst_points = np.float32([
-            [offset, h],
-            [w - offset, h],
-            [w - offset, 0],
-            [offset, 0]
+            [offset, h], [w - offset, h], [w - offset, 0], [offset, 0]
         ])
 
         self.M = cv2.getPerspectiveTransform(self.bev_src_points, self.bev_dst_points)
         self.Minv = cv2.getPerspectiveTransform(self.bev_dst_points, self.bev_src_points)
 
-        # Ước tính độ rộng làn
-        bottom_width = abs(points[1][0] - points[0][0])
+        # Ước tính độ rộng làn ban đầu từ ROI
+        bottom_width = abs(self.roi_points[1][0] - self.roi_points[0][0])
         self.standard_lane_width_pixels = int(bottom_width * 0.8)
 
-    def enable_auto_roi(self, enable=True):
-        """Bật/tắt chế độ ROI tự động."""
-        self.use_auto_roi = enable
-        if enable:
-            self.crop_rect = None  # Reset crop khi dùng auto
-            print("✓ Đã bật chế độ ROI tự động")
-        else:
-            print("✓ Đã tắt chế độ ROI tự động")
+        print(f"Cấu hình hoàn tất. Độ rộng làn ước tính: {self.standard_lane_width_pixels}px")
+        self.save_config()
 
-    # ================================================================
-    # =============== CROP & ROI HELPERS =============================
-    # ================================================================
+    # ==== ROI & BEV AUTO CHO GÓC CAM NÀY ====
 
     def _compute_auto_roi_points(self, h, w):
-        """ROI tự động: 2/5 ảnh từ dưới, 5/7 bề ngang."""
+        """
+        ROI tự động:
+        - 1/3 ảnh từ dưới lên
+        - 5/7 bề ngang tính từ giữa ảnh
+        """
         y_bottom = h - 1
-        y_top = int(h * (3.0 / 5.0))
+        y_top = int(h * (2.0 / 3.0))  # giữ 1/3 dưới
 
         roi_width = int(w * 5.0 / 7.0)
         half = roi_width // 2
@@ -338,141 +145,100 @@ class LaneNavigator:
             [x_left, y_top]
         ], dtype=np.float32)
 
-    def _crop_frame(self, frame):
-        """
-        Crop frame theo ROI bounding box.
-        Trả về: (cropped_frame, offset_x, offset_y)
-        """
-        if self.use_auto_roi or self.crop_rect is None:
-            # Tính auto crop từ auto ROI
-            h, w = frame.shape[:2]
-            roi_pts = self._compute_auto_roi_points(h, w)
-            x_min = int(np.min(roi_pts[:, 0]))
-            x_max = int(np.max(roi_pts[:, 0]))
-            y_min = int(np.min(roi_pts[:, 1]))
-            y_max = int(np.max(roi_pts[:, 1]))
-        else:
-            x_min, y_min, crop_w, crop_h = self.crop_rect
-            x_max = x_min + crop_w
-            y_max = y_min + crop_h
+    def _ensure_auto_bev(self, frame_shape):
+        """Khởi tạo src/dst cho BEV dựa trên ROI tự động (ghi đè config cũ)."""
+        h, w = frame_shape[:2]
+        roi_pts = self._compute_auto_roi_points(h, w)
 
-        # Đảm bảo trong bounds
-        h, w = frame.shape[:2]
-        x_min = max(0, x_min)
-        y_min = max(0, y_min)
-        x_max = min(w, x_max)
-        y_max = min(h, y_max)
+        # Lưu lại ROI để debug
+        self.roi_points = roi_pts.tolist()
+        self.bev_src_points = roi_pts
 
-        cropped = frame[y_min:y_max, x_min:x_max].copy()
+        # Destination: hình chữ nhật gần full frame, chừa mép 15%
+        offset = int(w * 0.15)
+        self.bev_dst_points = np.float32([
+            [offset, h],
+            [w - offset, h],
+            [w - offset, 0],
+            [offset, 0]
+        ])
 
-        return cropped, x_min, y_min
+        self.M = cv2.getPerspectiveTransform(self.bev_src_points, self.bev_dst_points)
+        self.Minv = cv2.getPerspectiveTransform(self.bev_dst_points, self.bev_src_points)
 
-    def _get_roi_mask_for_crop(self, crop_shape, offset_x, offset_y):
+    def preprocess_advanced(self, img):
         """
-        Tạo ROI mask cho ảnh đã crop.
-        Điều chỉnh tọa độ ROI theo offset crop.
+        Tiền xử lý cho track giấy trắng + băng keo đen (~1.5–2cm):
+
+        - ROI: 1/3 ảnh phía dưới + 5/7 bề ngang quanh tâm.
+        - HLS, lấy kênh L (Lightness).
+        - Tìm pixel TỐI (vạch đen) + cạnh (Sobel).
+        - Áp ROI mask: ngoài vùng chạy = 0.
+        - Trả về ảnh nhị phân 0/1.
         """
-        h, w = crop_shape[:2]
+        h, w = img.shape[:2]
+
+        # 1. ROI mask
+        roi_poly = self._compute_auto_roi_points(h, w).astype(np.int32)
         mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.fillPoly(mask, [roi_poly], 1)
 
-        if self.use_auto_roi or not self.config_loaded:
-            # Auto ROI - full crop area
-            cv2.rectangle(mask, (0, 0), (w - 1, h - 1), 1, -1)
-        else:
-            # Điều chỉnh ROI points theo crop offset
-            adjusted_pts = []
-            for pt in self.roi_points:
-                new_x = pt[0] - offset_x
-                new_y = pt[1] - offset_y
-                adjusted_pts.append([new_x, new_y])
-
-            roi_poly = np.array(adjusted_pts, dtype=np.int32)
-            cv2.fillPoly(mask, [roi_poly], 1)
-
-        return mask
-
-    def _ensure_bev_transform(self, frame_shape):
-        """Đảm bảo có ma trận BEV transform."""
-        if self.M is not None and self.Minv is not None:
-            return
-
-        if self.use_auto_roi or not self.config_loaded:
-            h, w = frame_shape[:2]
-            roi_pts = self._compute_auto_roi_points(h, w)
-
-            self.roi_points = roi_pts.tolist()
-            self.bev_src_points = roi_pts
-
-            # Tính crop rect
-            x_min = int(np.min(roi_pts[:, 0]))
-            x_max = int(np.max(roi_pts[:, 0]))
-            y_min = int(np.min(roi_pts[:, 1]))
-            y_max = int(np.max(roi_pts[:, 1]))
-            self.crop_rect = (x_min, y_min, x_max - x_min, y_max - y_min)
-
-            offset = int(w * 0.15)
-            self.bev_dst_points = np.float32([
-                [offset, h],
-                [w - offset, h],
-                [w - offset, 0],
-                [offset, 0]
-            ])
-
-            self.M = cv2.getPerspectiveTransform(self.bev_src_points, self.bev_dst_points)
-            self.Minv = cv2.getPerspectiveTransform(self.bev_dst_points, self.bev_src_points)
-            print("⚠ Đang dùng ROI tự động")
-
-    # ================================================================
-    # =============== TIỀN XỬ LÝ ẢNH =================================
-    # ================================================================
-
-    def preprocess_advanced(self, cropped_img, roi_mask):
-        """
-        Tiền xử lý cho track giấy trắng + băng keo đen.
-        Input: ảnh đã crop và mask ROI tương ứng.
-        """
-        # HLS -> kênh L
-        hls = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2HLS)
+        # 2. HLS -> kênh L
+        hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
         l_channel = hls[:, :, 1]
 
-        # Gradient theo x
+        # 3. Gradient theo x (giữ logic cũ, nhưng ngưỡng mềm hơn)
         sobelx = cv2.Sobel(l_channel, cv2.CV_64F, 1, 0)
         abs_sobelx = np.absolute(sobelx)
         scaled_sobel = np.uint8(255 * abs_sobelx / (np.max(abs_sobelx) + 1e-6))
 
         sxbinary = np.zeros_like(scaled_sobel, dtype=np.uint8)
-        sxbinary[(scaled_sobel >= self.sobel_thresh_min) &
-                 (scaled_sobel <= self.sobel_thresh_max)] = 1
+        sxbinary[(scaled_sobel >= 20) & (scaled_sobel <= 150)] = 1
 
-        # Ngưỡng L thấp -> vùng ĐEN
+        # 4. Ngưỡng L thấp -> vùng ĐEN
         l_binary = np.zeros_like(l_channel, dtype=np.uint8)
-        l_binary[l_channel < self.lightness_thresh] = 1
+        # nếu vạch hơi xám thì có thể tăng 80 -> 100
+        l_binary[l_channel < 60] = 1
 
-        # Kết hợp & áp ROI mask
+        # 5. Kết hợp & áp ROI
         combined_binary = np.zeros_like(sxbinary, dtype=np.uint8)
         combined_binary[(sxbinary == 1) | (l_binary == 1)] = 1
-        combined_binary = combined_binary * roi_mask
+
+        # Chỉ giữ trong ROI
+        combined_binary = combined_binary * mask
 
         return combined_binary
 
     # ================================================================
-    # =============== PHÁT HIỆN LÀN ĐƯỜNG ============================
+    # =============== PHẦN MỚI: PHÁT HIỆN LÀN CẢI TIẾN ===============
     # ================================================================
 
     def detect_lanes_sliding_window(self, binary_warped):
-        """Tìm làn đường bằng phương pháp cửa sổ trượt."""
+        """
+        Tìm làn đường bằng phương pháp cửa sổ trượt.
+        CẢI TIẾN: Trả về thông tin chi tiết về việc phát hiện được bao nhiêu làn.
+
+        Returns:
+            left_fit: Hệ số đa thức làn trái (hoặc None)
+            right_fit: Hệ số đa thức làn phải (hoặc None)
+            lane_data: Tuple (leftx, lefty, rightx, righty)
+            detection_info: Dict chứa thông tin phát hiện
+        """
         histogram = np.sum(binary_warped[binary_warped.shape[0] // 2:, :], axis=0)
         midpoint = np.int64(histogram.shape[0] / 2)
 
+        # Tìm đỉnh histogram cho mỗi nửa
         left_half = histogram[:midpoint]
         right_half = histogram[midpoint:]
 
         leftx_base = np.argmax(left_half)
         rightx_base = np.argmax(right_half) + midpoint
 
+        # Kiểm tra xem có đủ tín hiệu không
         left_peak = left_half[leftx_base] if len(left_half) > 0 else 0
         right_peak = right_half[rightx_base - midpoint] if len(right_half) > 0 else 0
 
+        # Ngưỡng tối thiểu cho peak
         min_peak_threshold = 20
 
         nwindows = 9
@@ -492,8 +258,11 @@ class LaneNavigator:
             win_y_low = binary_warped.shape[0] - (window + 1) * window_height
             win_y_high = binary_warped.shape[0] - window * window_height
 
+            # Cửa sổ làn trái
             win_xleft_low = leftx_current - margin
             win_xleft_high = leftx_current + margin
+
+            # Cửa sổ làn phải
             win_xright_low = rightx_current - margin
             win_xright_high = rightx_current + margin
 
@@ -513,6 +282,7 @@ class LaneNavigator:
         left_lane_inds = np.concatenate(left_lane_inds)
         right_lane_inds = np.concatenate(right_lane_inds)
 
+        # Xác định làn nào được phát hiện
         left_detected = len(left_lane_inds) >= self.min_lane_points and left_peak >= min_peak_threshold
         right_detected = len(right_lane_inds) >= self.min_lane_points and right_peak >= min_peak_threshold
 
@@ -545,36 +315,64 @@ class LaneNavigator:
         return left_fit, right_fit, (leftx, lefty, rightx, righty), detection_info
 
     def estimate_missing_lane(self, detected_fit, is_left_detected, img_height):
-        """Ước tính làn đường còn thiếu."""
+        """
+        Ước tính làn đường còn thiếu dựa trên làn đã phát hiện và độ rộng làn chuẩn.
+
+        Args:
+            detected_fit: Hệ số đa thức của làn đã phát hiện
+            is_left_detected: True nếu làn đã phát hiện là làn trái
+            img_height: Chiều cao ảnh
+
+        Returns:
+            estimated_fit: Hệ số đa thức ước tính cho làn còn thiếu
+        """
+        # Tạo các điểm y
         ploty = np.linspace(0, img_height - 1, img_height)
+
+        # Tính x của làn đã phát hiện
         detected_x = detected_fit[0] * ploty ** 2 + detected_fit[1] * ploty + detected_fit[2]
 
+        # Dịch chuyển theo độ rộng làn
         if is_left_detected:
+            # Làn trái đã phát hiện -> ước tính làn phải
             estimated_x = detected_x + self.standard_lane_width_pixels
         else:
+            # Làn phải đã phát hiện -> ước tính làn trái
             estimated_x = detected_x - self.standard_lane_width_pixels
 
+        # Fit lại đa thức cho làn ước tính
         estimated_fit = np.polyfit(ploty, estimated_x, 2)
+
         return estimated_fit
 
     def update_lane_width(self, left_fit, right_fit, img_height):
-        """Cập nhật độ rộng làn đường chuẩn."""
+        """Cập nhật độ rộng làn đường chuẩn dựa trên làn phát hiện được."""
         y_bottom = img_height - 1
         left_x = left_fit[0] * y_bottom ** 2 + left_fit[1] * y_bottom + left_fit[2]
         right_x = right_fit[0] * y_bottom ** 2 + right_fit[1] * y_bottom + right_fit[2]
 
         current_width = right_x - left_x
 
-        if 80 < current_width < 400:
+        # Chỉ cập nhật nếu độ rộng hợp lý (200-800 pixels)
+        if 250 < current_width < 450:
             self.lane_width_history.append(current_width)
             if len(self.lane_width_history) > self.max_history:
                 self.lane_width_history.pop(0)
+
+            # Cập nhật độ rộng chuẩn bằng trung bình
             self.standard_lane_width_pixels = int(np.mean(self.lane_width_history))
 
     def get_lanes_with_estimation(self, binary_warped, img_shape):
-        """Phát hiện làn đường với khả năng ước tính làn bị mất."""
+        """
+        Phát hiện làn đường với khả năng ước tính làn bị mất.
+
+        Returns:
+            left_fit, right_fit: Hệ số đa thức (thực tế hoặc ước tính)
+            lane_status: Dict chứa trạng thái chi tiết
+        """
         h = img_shape[0]
 
+        # Phát hiện làn đường
         left_fit, right_fit, lane_data, detection_info = self.detect_lanes_sliding_window(binary_warped)
 
         lane_status = {
@@ -585,9 +383,12 @@ class LaneNavigator:
             "warning": None
         }
 
-        # TRƯỜNG HỢP 1: CẢ HAI LÀN ĐƯỢC PHÁT HIỆN
+        # === TRƯỜNG HỢP 1: CẢ HAI LÀN ĐƯỢC PHÁT HIỆN ===
         if detection_info["both_detected"]:
+            # Cập nhật độ rộng làn chuẩn
             self.update_lane_width(left_fit, right_fit, h)
+
+            # Lưu lại fit để dùng sau
             self.prev_left_fit = left_fit.copy()
             self.prev_right_fit = right_fit.copy()
             self.frames_since_both_lanes = 0
@@ -598,7 +399,7 @@ class LaneNavigator:
 
             return left_fit, right_fit, lane_status
 
-        # TRƯỜNG HỢP 2: CHỈ CÓ LÀN TRÁI
+        # === TRƯỜNG HỢP 2: CHỈ CÓ LÀN TRÁI ===
         elif detection_info["left_detected"] and not detection_info["right_detected"]:
             self.frames_since_both_lanes += 1
             self.prev_left_fit = left_fit.copy()
@@ -606,8 +407,10 @@ class LaneNavigator:
             lane_status["left_source"] = "detected"
             lane_status["warning"] = "RIGHT_LANE_MISSING"
 
+            # Ước tính làn phải
             if self.frames_since_both_lanes <= self.max_frames_without_both:
                 if self.prev_right_fit is not None:
+                    # Sử dụng fit trước đó với điều chỉnh
                     right_fit = self._blend_with_previous(
                         self.estimate_missing_lane(left_fit, True, h),
                         self.prev_right_fit,
@@ -626,7 +429,7 @@ class LaneNavigator:
 
             return left_fit, right_fit, lane_status
 
-        # TRƯỜNG HỢP 3: CHỈ CÓ LÀN PHẢI
+        # === TRƯỜNG HỢP 3: CHỈ CÓ LÀN PHẢI ===
         elif detection_info["right_detected"] and not detection_info["left_detected"]:
             self.frames_since_both_lanes += 1
             self.prev_right_fit = right_fit.copy()
@@ -634,6 +437,7 @@ class LaneNavigator:
             lane_status["right_source"] = "detected"
             lane_status["warning"] = "LEFT_LANE_MISSING"
 
+            # Ước tính làn trái
             if self.frames_since_both_lanes <= self.max_frames_without_both:
                 if self.prev_left_fit is not None:
                     left_fit = self._blend_with_previous(
@@ -654,11 +458,12 @@ class LaneNavigator:
 
             return left_fit, right_fit, lane_status
 
-        # TRƯỜNG HỢP 4: KHÔNG PHÁT HIỆN ĐƯỢC LÀN NÀO
+        # === TRƯỜNG HỢP 4: KHÔNG PHÁT HIỆN ĐƯỢC LÀN NÀO ===
         else:
             self.frames_since_both_lanes += 1
             lane_status["warning"] = "NO_LANES_DETECTED"
 
+            # Sử dụng fit trước đó nếu có và còn trong thời hạn
             if (self.frames_since_both_lanes <= self.max_frames_without_both and
                     self.prev_left_fit is not None and self.prev_right_fit is not None):
                 left_fit = self.prev_left_fit
@@ -669,22 +474,25 @@ class LaneNavigator:
 
                 return left_fit, right_fit, lane_status
 
+            # Hoàn toàn mất dấu
             lane_status["confidence"] = 0.0
             return None, None, lane_status
 
     def _blend_with_previous(self, estimated_fit, previous_fit, frames_elapsed):
-        """Kết hợp fit ước tính với fit trước đó."""
+        """Kết hợp fit ước tính với fit trước đó để mượt hơn."""
+        # Trọng số cho fit trước đó giảm dần theo thời gian
         prev_weight = max(0.2, 1.0 - frames_elapsed * 0.1)
         est_weight = 1.0 - prev_weight
+
         blended_fit = prev_weight * previous_fit + est_weight * estimated_fit
         return blended_fit
 
     # ================================================================
-    # =============== PHÂN TÍCH HÌNH HỌC =============================
+    # =============== PHÂN TÍCH HÌNH HỌC LÀN ĐƯỜNG ===================
     # ================================================================
 
     def analyze_lane_geometry(self, img_shape, left_fit, right_fit):
-        """Phân tích hình học làn đường."""
+        """Phân tích hình học làn đường chi tiết."""
         h, w = img_shape[:2]
 
         y_bottom = h - 1
@@ -700,10 +508,12 @@ class LaneNavigator:
         center_middle, left_middle, right_middle = get_lane_center(y_middle)
         center_ahead, left_ahead, right_ahead = get_lane_center(y_ahead)
 
+        # Offset
         image_center = w / 2
         offset_pixels = image_center - center_bottom
         offset_meters = offset_pixels * self.xm_per_pix
 
+        # Góc nghiêng
         dx = center_ahead - center_bottom
         dy = y_bottom - y_ahead
         lane_angle_deg = np.degrees(np.arctan2(dx, dy))
@@ -712,6 +522,7 @@ class LaneNavigator:
         dy_near = y_bottom - y_middle
         lane_angle_near = np.degrees(np.arctan2(dx_near, dy_near))
 
+        # Độ cong
         avg_a = (left_fit[0] + right_fit[0]) / 2
         avg_b = (left_fit[1] + right_fit[1]) / 2
 
@@ -748,7 +559,13 @@ class LaneNavigator:
         }
 
     def calculate_steering_decision(self, lane_geometry, lane_status):
-        """Tính toán quyết định điều khiển."""
+        """
+        Tính toán quyết định điều khiển.
+
+        - 2 làn thật: offset + góc + cong (như cũ)
+        - 1 làn (một lane bị mất, lane kia ước lượng): bỏ offset,
+          chỉ dùng góc gần + cong cùng chiều với góc.
+        """
         offset = lane_geometry["offset_meters"]
         angle = lane_geometry["lane_angle_deg"]
         angle_near = lane_geometry["lane_angle_near"]
@@ -756,12 +573,14 @@ class LaneNavigator:
         curve_strength = lane_geometry["curvature_strength"]
         radius = lane_geometry["radius_meters"]
 
+        # Độ tin cậy & trạng thái làn
         confidence = lane_status.get("confidence", 1.0)
         warning = lane_status.get("warning")
         detection = lane_status.get("detection", {})
         left_src = lane_status.get("left_source", "none")
         right_src = lane_status.get("right_source", "none")
 
+        # 2 làn thật, tin cậy
         both_lanes_reliable = (
                 detection.get("both_detected", False)
                 and warning is None
@@ -769,59 +588,89 @@ class LaneNavigator:
                 and right_src == "detected"
                 and confidence >= 0.6
         )
-
+        # Chỉ còn 1 làn (bên kia mất/ước lượng)
         single_lane_mode = (
                 detection.get("single_lane", False)
                 or warning in ("LEFT_LANE_MISSING", "RIGHT_LANE_MISSING")
         )
 
+        # Trọng số cơ bản theo confidence
         effective_k_offset = self.k_offset * confidence
         effective_k_angle = self.k_angle * confidence
         effective_k_curvature = self.k_curvature * confidence
 
+        # Nếu chỉ 1 làn: bỏ offset, tăng vai trò góc + cong
         if single_lane_mode:
-            effective_k_offset = 0.0
+            effective_k_offset *= 0.2
             effective_k_angle *= 1.2
             effective_k_curvature *= 1.5
 
+        # ===== TÍNH CÁC THÀNH PHẦN ĐÓNG GÓP =====
         offset_contribution = 0.0
         angle_contribution = 0.0
         curve_contribution = 0.0
 
+        # 2 làn thật hoặc mode "bình thường" -> logic cũ
         if both_lanes_reliable or not single_lane_mode:
+            # Offset: offset > 0 => làn lệch trái => cần quẹo trái => dấu "-"
             offset_norm = np.clip(offset / 0.5, -1, 1)
             offset_contribution = -effective_k_offset * offset_norm
 
+            # Góc: kết hợp xa + gần, ưu tiên góc gần
             angle_norm = np.clip(angle / 25.0, -1, 1)
             angle_near_norm = np.clip(angle_near / 30.0, -1, 1)
             angle_combined = 0.4 * angle_norm + 0.6 * angle_near_norm
             angle_contribution = effective_k_angle * angle_combined
 
+            # Độ cong từ coef a
             curve_norm = curve_dir * min(curve_strength / 50.0, 1.0)
             curve_contribution = effective_k_curvature * curve_norm
+
+        # ===== CHẾ ĐỘ CHỈ 1 LÀN =====
         else:
+            # Chỉ tin góc gần (ROI ~ 20cm trước xe)
             angle_near_norm = np.clip(angle_near / 25.0, -1, 1)
             angle_contribution = effective_k_angle * angle_near_norm
 
+            # Hướng cong: cho cùng chiều với góc gần
             if abs(angle_near_norm) > 0.05:
                 curve_dir_single = np.sign(angle_near_norm)
             else:
+                # Nếu góc rất nhỏ thì giữ hướng như frame trước (nếu có)
                 curve_dir_single = np.sign(self.prev_steering_score) if self.prev_steering_score != 0 else 0.0
 
+            # Độ mạnh cong: scale theo độ lớn góc gần (0..1)
             curve_strength_single = min(abs(angle_near) / 20.0, 1.0)
             curve_contribution = effective_k_curvature * curve_dir_single * curve_strength_single
 
+        # ===== TỔNG HỢP =====
         raw_steering_score = offset_contribution + angle_contribution + curve_contribution
 
+        # Van an toàn: trong chế độ 1 làn, không cho đổi dấu "gấp" khi tín hiệu yếu
         if single_lane_mode and self.prev_steering_score != 0:
             if raw_steering_score * self.prev_steering_score < 0 and abs(raw_steering_score) < 0.6:
                 raw_steering_score = np.sign(self.prev_steering_score) * abs(raw_steering_score)
 
-        effective_smoothing = min(0.6, self.smoothing_factor + (1 - confidence) * 0.2)
+        # Làm mượt - tăng smoothing khi confidence thấp
+        # Làm mượt - tăng smoothing khi confidence thấp (0.7–0.95)
+        base = self.smoothing_factor  # vd: 0.9
+        effective_smoothing = np.clip(
+            base + (1 - confidence) * 0.05,  # confidence thấp -> nhích thêm một chút
+            0.3,  # tối thiểu
+            0.9  # tối đa để khỏi quá ì
+        )
+
+        # Nếu hướng raw khác hướng trước đó và raw khá mạnh -> tin tín hiệu mới hơn
+        if self.prev_steering_score != 0 and raw_steering_score * self.prev_steering_score < 0 \
+                and abs(raw_steering_score) > 0.3:
+            effective_smoothing = min(effective_smoothing, 0.3)
+
         steering_score = (effective_smoothing * self.prev_steering_score +
                           (1 - effective_smoothing) * raw_steering_score)
+
         self.prev_steering_score = steering_score
 
+        # Quyết định hành động
         abs_score = abs(steering_score)
 
         if abs_score < self.steering_threshold:
@@ -845,6 +694,7 @@ class LaneNavigator:
                 action_code = -1
             direction = "left"
 
+        # Gắn nhãn ước tính nếu confidence thấp
         if confidence < 0.7:
             action = f"[EST] {action}"
 
@@ -879,105 +729,57 @@ class LaneNavigator:
         }
 
     # ================================================================
-    # =============== PROCESS FRAME ==================================
+    # =============== PROCESS FRAME CHÍNH ============================
     # ================================================================
 
     def process_frame(self, frame, debug=False):
         """Hàm xử lý chính cho 1 frame ảnh."""
-
-        # Đảm bảo có BEV transform
-        self._ensure_bev_transform(frame.shape)
+        self._ensure_auto_bev(frame.shape)
 
         if self.M is None:
-            raise Exception("Chưa có config! Chạy select_points_interactive() hoặc load_config()")
+            raise Exception("Vui lòng chạy select_points_interactive() hoặc load_config() trước!")
 
-        # === 1. CROP FRAME THEO ROI ===
-        cropped_frame, offset_x, offset_y = self._crop_frame(frame)
+        # 1. Preprocessing & Warp
+        binary_img = self.preprocess_advanced(frame)
+        img_size = (frame.shape[1], frame.shape[0])
+        warped = cv2.warpPerspective(binary_img, self.M, img_size, flags=cv2.INTER_LINEAR)
 
-        # === 2. TẠO ROI MASK CHO VÙNG CROP ===
-        roi_mask = self._get_roi_mask_for_crop(cropped_frame.shape, offset_x, offset_y)
-
-        # === 3. PREPROCESSING TRÊN ẢNH ĐÃ CROP ===
-        binary_cropped = self.preprocess_advanced(cropped_frame, roi_mask)
-
-        # === 4. ĐƯA VỀ KÍCH THƯỚC GỐC ĐỂ WARP ===
-        h, w = frame.shape[:2]
-        binary_full = np.zeros((h, w), dtype=np.uint8)
-
-        crop_h, crop_w = binary_cropped.shape[:2]
-        y_end = min(offset_y + crop_h, h)
-        x_end = min(offset_x + crop_w, w)
-        binary_full[offset_y:y_end, offset_x:x_end] = binary_cropped[:y_end - offset_y, :x_end - offset_x]
-
-        # === 5. WARP TO BEV ===
-        img_size = (w, h)
-        warped = cv2.warpPerspective(binary_full, self.M, img_size, flags=cv2.INTER_LINEAR)
-
-        # === 6. DETECT LANES ===
+        # 2. Detect Lanes với ước tính (CẢI TIẾN)
         left_fit, right_fit, lane_status = self.get_lanes_with_estimation(warped, frame.shape)
 
-        # === 7. XỬ LÝ KHI MẤT LÀN ===
+        # 3. Xử lý khi không phát hiện được làn
         if left_fit is None or right_fit is None:
             self.prev_steering_score = 0
-            result = frame.copy()
-            if debug:
-                self._draw_crop_overlay(result, offset_x, offset_y, crop_w, crop_h)
-            return result, {
+            return frame, {
                 "status": "LOST_LANE",
                 "action": "!!! SLOW DOWN !!!",
                 "action_code": 99,
                 "lane_status": lane_status
             }
 
-        # === 8. PHÂN TÍCH HÌNH HỌC ===
+        # 4. Phân tích hình học
         lane_geometry = self.analyze_lane_geometry(frame.shape, left_fit, right_fit)
 
-        # === 9. TÍNH TOÁN QUYẾT ĐỊNH ===
+        # 5. Tính toán quyết định
         control_decision = self.calculate_steering_decision(lane_geometry, lane_status)
 
-        # === 10. VẼ KẾT QUẢ ===
+        # 6. Vẽ lên ảnh
         result = self._draw_lanes(frame, warped, left_fit, right_fit,
                                   lane_geometry, control_decision, lane_status)
 
-        # === DEBUG MODE ===
+        # DEBUG MODE
         if debug:
-            self._draw_debug_view(result, warped, binary_cropped, lane_geometry, lane_status)
-            self._draw_crop_overlay(result, offset_x, offset_y, crop_w, crop_h)
+            self._draw_debug_view(result, warped, lane_geometry, lane_status)
 
-        # === OUTPUT ===
+        # 7. Output
         output_info = {
             "status": "TRACKING",
             **control_decision,
             "lane_status": lane_status,
-            "geometry": lane_geometry,
-            "crop_info": {
-                "offset_x": offset_x,
-                "offset_y": offset_y,
-                "width": crop_w,
-                "height": crop_h
-            }
+            "geometry": lane_geometry
         }
 
         return result, output_info
-
-    def _draw_crop_overlay(self, img, offset_x, offset_y, crop_w, crop_h):
-        """Vẽ đường viền vùng crop và ROI lên ảnh."""
-        # Vẽ vùng crop (màu xanh dương)
-        cv2.rectangle(img,
-                      (offset_x, offset_y),
-                      (offset_x + crop_w, offset_y + crop_h),
-                      (255, 0, 0), 2)
-
-        # Vẽ ROI polygon (màu tím)
-        if self.roi_points:
-            pts = np.array(self.roi_points, dtype=np.int32)
-            cv2.polylines(img, [pts], True, (255, 0, 255), 2)
-
-        # Hiển thị thông tin
-        roi_source = "AUTO" if self.use_auto_roi else "CONFIG"
-        cv2.putText(img, f"ROI: {roi_source} | Crop: {crop_w}x{crop_h}",
-                    (10, img.shape[0] - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
 
     def _draw_lanes(self, frame, warped, left_fit, right_fit, geometry, decision, lane_status):
         """Vẽ làn đường lên ảnh."""
@@ -994,19 +796,23 @@ class LaneNavigator:
         pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
         pts = np.hstack((pts_left, pts_right))
 
+        # Màu vùng làn theo hướng và confidence
         confidence = lane_status.get("confidence", 1.0)
 
         if decision["direction"] == "left":
-            base_color = (255, 100, 0)
+            base_color = (255, 100, 0)  # Xanh dương
         elif decision["direction"] == "right":
-            base_color = (0, 100, 255)
+            base_color = (0, 100, 255)  # Cam
         else:
-            base_color = (0, 255, 0)
+            base_color = (0, 255, 0)  # Xanh lá
 
+        # Giảm độ sáng nếu confidence thấp
         lane_color = tuple(int(c * confidence) for c in base_color)
+
         cv2.fillPoly(color_warp, np.int_([pts]), lane_color)
 
-        left_color = (0, 255, 0) if lane_status["left_source"] == "detected" else (0, 255, 255)
+        # Vẽ đường làn với màu khác nhau cho detected vs estimated
+        left_color = (0, 255, 0) if lane_status["left_source"] == "detected" else (0, 255, 255)  # Vàng nếu ước tính
         right_color = (0, 255, 0) if lane_status["right_source"] == "detected" else (0, 255, 255)
 
         for i in range(len(ploty) - 1):
@@ -1018,15 +824,18 @@ class LaneNavigator:
             pt2_r = (int(right_fitx[i + 1]), int(ploty[i + 1]))
             cv2.line(color_warp, pt1_r, pt2_r, right_color, 3)
 
+        # Vẽ đường tâm
         center_fitx = (left_fitx + right_fitx) / 2
         for i in range(0, len(ploty) - 10, 10):
             pt1 = (int(center_fitx[i]), int(ploty[i]))
             pt2 = (int(center_fitx[i + 10]), int(ploty[i + 10]))
             cv2.line(color_warp, pt1, pt2, (255, 255, 0), 3)
 
+        # Unwarp
         newwarp = cv2.warpPerspective(color_warp, self.Minv, (w, h))
         result = cv2.addWeighted(frame, 1, newwarp, 0.4, 0)
 
+        # Vẽ info panel
         self._draw_info_panel(result, geometry, decision, lane_status)
 
         return result
@@ -1036,10 +845,12 @@ class LaneNavigator:
         font = cv2.FONT_HERSHEY_SIMPLEX
         h, w = img.shape[:2]
 
+        # Background panel
         overlay = img.copy()
         cv2.rectangle(overlay, (10, 10), (420, 280), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.6, img, 0.4, 0, img)
 
+        # Màu theo hướng
         if decision["direction"] == "left":
             cmd_color = (255, 150, 0)
         elif decision["direction"] == "right":
@@ -1050,9 +861,11 @@ class LaneNavigator:
         y_offset = 35
         line_height = 26
 
+        # === LANE STATUS ===
         confidence = lane_status.get("confidence", 1.0)
         warning = lane_status.get("warning")
 
+        # Hiển thị trạng thái phát hiện làn
         left_src = lane_status.get("left_source", "none")
         right_src = lane_status.get("right_source", "none")
 
@@ -1061,17 +874,20 @@ class LaneNavigator:
         cv2.putText(img, status_text, (20, y_offset), font, 0.5, status_color, 1)
         y_offset += line_height
 
+        # Cảnh báo nếu có
         if warning:
-            warning_color = (0, 165, 255)
+            warning_color = (0, 165, 255)  # Cam
             if warning == "NO_LANES_DETECTED":
-                warning_color = (0, 0, 255)
+                warning_color = (0, 0, 255)  # Đỏ
             cv2.putText(img, f"! {warning}", (20, y_offset), font, 0.5, warning_color, 2)
             y_offset += line_height
 
+        # === LỆNH ĐIỀU KHIỂN ===
         cv2.putText(img, f"CMD: {decision['action']}", (20, y_offset),
                     font, 0.7, cmd_color, 2)
         y_offset += line_height + 5
 
+        # Thông số chi tiết
         cv2.putText(img, f"Offset: {geometry['offset_meters']:+.2f}m", (20, y_offset),
                     font, 0.55, (255, 255, 255), 1)
         y_offset += line_height
@@ -1094,6 +910,7 @@ class LaneNavigator:
                     font, 0.55, (255, 255, 255), 1)
         y_offset += line_height
 
+        # Steering bar
         bar_center = 210
         bar_width = 160
         bar_y = y_offset
@@ -1107,103 +924,51 @@ class LaneNavigator:
         indicator_x = np.clip(indicator_x, bar_center - bar_width // 2, bar_center + bar_width // 2)
         cv2.circle(img, (indicator_x, bar_y + 7), 8, cmd_color, -1)
 
-    def _draw_debug_view(self, result, warped, binary_cropped, geometry, lane_status):
-        """Vẽ view debug với ảnh binary đã crop."""
+    def _draw_debug_view(self, result, warped, geometry, lane_status):
+        """Vẽ view debug."""
         h, w = result.shape[:2]
 
-        # BEV warped view
-        debug_warp = np.dstack((warped, warped, warped)) * 255
-        debug_warp = debug_warp.astype(np.uint8)
+        # BEV view
+        debug_view = np.dstack((warped, warped, warped)) * 255
+        debug_view = debug_view.astype(np.uint8)
 
+        # Vẽ điểm tâm
         scale_y = warped.shape[0] / h
-        cv2.circle(debug_warp, (int(geometry['center_bottom']), int((h - 1) * scale_y)),
+        cv2.circle(debug_view, (int(geometry['center_bottom']), int((h - 1) * scale_y)),
                    8, (0, 0, 255), -1)
-        cv2.circle(debug_warp, (int(geometry['center_ahead']), int(h * 0.3 * scale_y)),
+        cv2.circle(debug_view, (int(geometry['center_ahead']), int(h * 0.3 * scale_y)),
                    8, (0, 255, 0), -1)
-        cv2.circle(debug_warp, (int(geometry['image_center']), int((h - 1) * scale_y)),
+        cv2.circle(debug_view, (int(geometry['image_center']), int((h - 1) * scale_y)),
                    8, (255, 0, 0), -1)
 
-        debug_warp = cv2.resize(debug_warp, (200, 150))
-        result[0:150, w - 200:w] = debug_warp
+        debug_view = cv2.resize(debug_view, (320, 180))
+        result[0:180, w - 320:w] = debug_view
 
-        # Binary cropped view
-        binary_view = np.dstack((binary_cropped, binary_cropped, binary_cropped)) * 255
-        binary_view = binary_view.astype(np.uint8)
-        binary_view = cv2.resize(binary_view, (200, 150))
-        result[0:150, w - 410:w - 210] = binary_view
+        # Legend
+        cv2.putText(result, "RED: Lane Center", (w - 310, 195),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+        cv2.putText(result, "BLUE: Image Center", (w - 310, 210),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
 
-        # Labels
-        cv2.putText(result, "BEV", (w - 195, 145),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
-        cv2.putText(result, "Binary Crop", (w - 405, 145),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
-
+        # Detection info
         det = lane_status.get("detection", {})
         cv2.putText(result, f"L:{det.get('left_points', 0)} R:{det.get('right_points', 0)}",
-                    (w - 195, 165), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-
-    # ================================================================
-    # =============== UTILITY METHODS ================================
-    # ================================================================
+                    (w - 310, 225), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
     def set_control_weights(self, k_offset=None, k_angle=None, k_curvature=None):
-        """Điều chỉnh trọng số điều khiển."""
+        """Điều chỉnh trọng số."""
         if k_offset is not None:
             self.k_offset = k_offset
         if k_angle is not None:
             self.k_angle = k_angle
         if k_curvature is not None:
             self.k_curvature = k_curvature
-        print(f"Weights: offset={self.k_offset:.2f}, angle={self.k_angle:.2f}, curve={self.k_curvature:.2f}")
+        print(f"Weights: offset={self.k_offset}, angle={self.k_angle}, curve={self.k_curvature}")
 
     def set_lane_width(self, width_pixels):
-        """Đặt độ rộng làn đường chuẩn."""
+        """Đặt độ rộng làn đường chuẩn thủ công."""
         self.standard_lane_width_pixels = width_pixels
-        print(f"Lane width: {width_pixels}px")
-
-    def set_preprocess_params(self, sobel_min=None, sobel_max=None, lightness=None):
-        """Điều chỉnh thông số tiền xử lý."""
-        if sobel_min is not None:
-            self.sobel_thresh_min = sobel_min
-        if sobel_max is not None:
-            self.sobel_thresh_max = sobel_max
-        if lightness is not None:
-            self.lightness_thresh = lightness
-        print(f"Preprocess: sobel=[{self.sobel_thresh_min},{self.sobel_thresh_max}], L={self.lightness_thresh}")
-
-    def set_steering_thresholds(self, steer=None, sharp=None):
-        """Điều chỉnh ngưỡng steering."""
-        if steer is not None:
-            self.steering_threshold = steer
-        if sharp is not None:
-            self.sharp_turn_threshold = sharp
-        print(f"Thresholds: steer={self.steering_threshold:.2f}, sharp={self.sharp_turn_threshold:.2f}")
-
-    def get_config_dict(self):
-        """Trả về dict chứa toàn bộ config hiện tại."""
-        return {
-            "roi_points": self.roi_points,
-            "crop_rect": self.crop_rect,
-            "use_auto_roi": self.use_auto_roi,
-            "config_loaded": self.config_loaded,
-            "control": {
-                "k_offset": self.k_offset,
-                "k_angle": self.k_angle,
-                "k_curvature": self.k_curvature,
-                "steering_threshold": self.steering_threshold,
-                "sharp_turn_threshold": self.sharp_turn_threshold,
-                "smoothing_factor": self.smoothing_factor,
-            },
-            "lane": {
-                "standard_width": self.standard_lane_width_pixels,
-                "min_points": self.min_lane_points,
-            },
-            "preprocess": {
-                "sobel_min": self.sobel_thresh_min,
-                "sobel_max": self.sobel_thresh_max,
-                "lightness_thresh": self.lightness_thresh,
-            }
-        }
+        print(f"Lane width set to: {width_pixels}px")
 
 
 # ========================================================
@@ -1211,29 +976,20 @@ class LaneNavigator:
 # ========================================================
 def main():
     from stream_manager import stream_manager
+
     stream_manager.start()
     lane_nav = LaneNavigator()
 
-    # Đọc ảnh test
     first_frame = stream_manager.get_latest_frame()
-    if first_frame is None:
-        print("Không tìm thấy ảnh img_1.png")
-        return
 
-    # === Load hoặc tạo config ===
-    if not lane_nav.load_config("lane_nav_config.json"):
-        print("\nKhông có config, mở giao diện chọn ROI...")
-        lane_nav.select_points_interactive(first_frame)
+    # Chọn cấu hình
+    lane_nav.select_points_interactive(first_frame)
+    # lane_nav.load_config("lane_nav_config.json")
 
     print("\n=== ĐIỀU KHIỂN ===")
     print("Q: Thoát")
-    print("R: Chọn lại ROI")
-    print("A: Bật/tắt ROI tự động")
-    print("S: Lưu config")
-    print("1/2/3: +/- trọng số Offset/Angle/Curve (Shift để giảm)")
-    print("4/5: +/- ngưỡng steering/sharp")
-    print("6/7/8: +/- sobel_min/sobel_max/lightness")
-    print("W/X: +/- độ rộng làn")
+    print("1/2/3: Tăng trọng số Offset/Angle/Curve")
+    print("W: Tăng độ rộng làn | S: Giảm độ rộng làn")
     print("==================\n")
 
     while True:
@@ -1244,87 +1000,45 @@ def main():
 
             cv2.imshow("Lane Tracking", processed_frame)
 
+            # In thông tin
             if info["status"] == "TRACKING":
                 lane_st = info.get("lane_status", {})
                 conf = lane_st.get("confidence", 1.0)
                 warn = lane_st.get("warning", "")
 
-                print(f"\r[{info['action']:^25}] "
+                print(f"[{info['action']:^25}] "
                       f"Score:{info['steering_score']:+.2f} "
                       f"Off:{info['raw_data']['offset_m']:+.2f}m "
                       f"Ang:{info['raw_data']['lane_angle']:+.1f}° "
-                      f"Conf:{conf:.0%} {warn}", end="")
+                      f"Conf:{conf:.0%} {warn}")
             else:
-                print(f"\r[{info['action']}] - {info.get('lane_status', {}).get('warning', '')}", end="")
+                print(f"[{info['action']}] - {info.get('lane_status', {}).get('warning', '')}")
 
         except Exception as e:
-            print(f"\nError: {e}")
+            print(f"Error: {e}")
             import traceback
             traceback.print_exc()
             continue
 
-        key = cv2.waitKey(100) & 0xFF
-
+        key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
-        elif key == ord('r'):
-            cv2.destroyAllWindows()
-            lane_nav.select_points_interactive(first_frame)
-        elif key == ord('a'):
-            lane_nav.enable_auto_roi(not lane_nav.use_auto_roi)
-        elif key == ord('s'):
-            lane_nav.save_config()
-
-        # Control weights
         elif key == ord('1'):
-            lane_nav.set_control_weights(k_offset=lane_nav.k_offset + 0.05)
-        elif key == ord('!'):
-            lane_nav.set_control_weights(k_offset=max(0, lane_nav.k_offset - 0.05))
+            lane_nav.set_control_weights(k_offset=lane_nav.k_offset + 0.1)
         elif key == ord('2'):
-            lane_nav.set_control_weights(k_angle=lane_nav.k_angle + 0.05)
-        elif key == ord('@'):
-            lane_nav.set_control_weights(k_angle=max(0, lane_nav.k_angle - 0.05))
+            lane_nav.set_control_weights(k_angle=lane_nav.k_angle + 0.1)
         elif key == ord('3'):
-            lane_nav.set_control_weights(k_curvature=lane_nav.k_curvature + 0.05)
-        elif key == ord('#'):
-            lane_nav.set_control_weights(k_curvature=max(0, lane_nav.k_curvature - 0.05))
-
-        # Steering thresholds
-        elif key == ord('4'):
-            lane_nav.set_steering_thresholds(steer=lane_nav.steering_threshold + 0.05)
-        elif key == ord('$'):
-            lane_nav.set_steering_thresholds(steer=max(0, lane_nav.steering_threshold - 0.05))
-        elif key == ord('5'):
-            lane_nav.set_steering_thresholds(sharp=lane_nav.sharp_turn_threshold + 0.05)
-        elif key == ord('%'):
-            lane_nav.set_steering_thresholds(sharp=max(0, lane_nav.sharp_turn_threshold - 0.05))
-
-        # Preprocess params
-        elif key == ord('6'):
-            lane_nav.set_preprocess_params(sobel_min=lane_nav.sobel_thresh_min + 5)
-        elif key == ord('^'):
-            lane_nav.set_preprocess_params(sobel_min=max(0, lane_nav.sobel_thresh_min - 5))
-        elif key == ord('7'):
-            lane_nav.set_preprocess_params(sobel_max=lane_nav.sobel_thresh_max + 5)
-        elif key == ord('&'):
-            lane_nav.set_preprocess_params(sobel_max=max(0, lane_nav.sobel_thresh_max - 5))
-        elif key == ord('8'):
-            lane_nav.set_preprocess_params(lightness=lane_nav.lightness_thresh + 5)
-        elif key == ord('*'):
-            lane_nav.set_preprocess_params(lightness=max(0, lane_nav.lightness_thresh - 5))
-
-        # Lane width
+            lane_nav.set_control_weights(k_curvature=lane_nav.k_curvature + 0.1)
         elif key == ord('w'):
-            lane_nav.set_lane_width(lane_nav.standard_lane_width_pixels + 10)
-        elif key == ord('x'):
-            lane_nav.set_lane_width(max(50, lane_nav.standard_lane_width_pixels - 10))
+            lane_nav.set_lane_width(lane_nav.standard_lane_width_pixels + 20)
+        elif key == ord('s'):
+            lane_nav.set_lane_width(lane_nav.standard_lane_width_pixels - 20)
 
     cv2.destroyAllWindows()
-    stream_manager.stop()
 
 
 if __name__ == "__main__":
     main()
 
 lane_nav = LaneNavigator()
-lane_nav.load_config("control/lane_nav_config.json")
+lane_nav.load_config("E:\PTIT\Hoc Ky I nam IV\Iot va ung dung\IOTD22CN2\lane_nav_config.json")
