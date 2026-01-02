@@ -24,7 +24,7 @@ except Exception as e:
 MIN_CONFIDENCE = 0.40
 
 # Biến lưu trạng thái hiện tại
-current_command = {'command': 'stop', 'speed': 150}
+current_command = {'command': 'stop', 'speed': 100}
 last_analysis_result = {"detections": [], "status": "idle"}
 
 
@@ -36,8 +36,9 @@ def index(request):
 def get_command(request):
     """API endpoint để ESP32 lấy lệnh"""
     cmd, speed = car_control.get_command()
-    print("GET COMMAND:", cmd, speed)
     # global current_command
+    # cmd, speed = current_command['command'], current_command['speed']
+    print("GET COMMAND:", cmd, speed)
     current_command = {'command': cmd, 'speed': speed}
     return Response(current_command)
 
@@ -46,17 +47,17 @@ def get_command(request):
 @api_view(['POST'])
 def set_command(request):
     """API endpoint để gửi lệnh điều khiển"""
-    global current_command
+    # global current_command
 
     command = request.data.get('command', 'stop')
     speed = request.data.get('speed', 110)
-
+    print("SET COMMAND:", command, speed)
     # Lưu lệnh vào database (optional)
-    Command.objects.create(command=command, speed=speed)
+    # Command.objects.create(command=command, speed=speed)
     car_control.set_speed(speed)
     car_control.set_base_speed(speed)
     # Cập nhật lệnh hiện tại
-    current_command = {'command': command, 'speed': speed}
+    # current_command = {'command': command, 'speed': speed}
     if command == 'stop':
         car_control.pause()
     if command == 'forward':
@@ -129,7 +130,6 @@ def analyze_stream_once(request):
         DetectionResult.objects.create(status="error", error_msg=str(e))
         last_analysis_result = {"detections": [], "status": "error", "error_msg": str(e)}
         return Response(last_analysis_result, status=500)
-
 
 
 @csrf_exempt

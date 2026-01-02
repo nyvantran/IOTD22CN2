@@ -5,8 +5,6 @@ import threading
 from collections import defaultdict
 import time
 
-from control.stream_manager import stream_manager
-
 
 class StreamManager:
     """
@@ -87,6 +85,11 @@ class StreamManager:
                         self.fps = self.frame_count
                         self.frame_count = 0
                         self.last_fps_time = current_time
+                        if self.fps < 15:
+                            print(f"Cảnh báo: FPS thấp - {self.fps}")
+                            self.register_with_esp()
+
+                        print(self.fps)
 
                     # Clear stored packets for this frame
                     del self.frames[frame_id]
@@ -107,7 +110,8 @@ class StreamManager:
             print("Stream manager đã khởi động.")
             self.register_with_esp()
         while self.get_latest_frame() is None:
-            time.sleep(0.1)  # Chờ cho đến khi có frame đầu tiên
+            time.sleep(1)  # Chờ cho đến khi có frame đầu tiên
+            self.register_with_esp()
         print("Frame đầu tiên đã sẵn sàng.")
 
     def stop(self):
@@ -136,7 +140,7 @@ class StreamManager:
 
 
 def main():
-    esp_ip = "10.251.0.62"
+    esp_ip = "172.20.10.5"
     udp_port = 8888
     stream_manager = StreamManager(esp_ip, udp_port)
     stream_manager.start()
@@ -159,5 +163,5 @@ def main():
 if __name__ == "__main__":
     main()
 
-stream_manager = StreamManager(esp_ip="10.251.0.62", port=8888)
-stream_manager.start()
+stream_manager = StreamManager(esp_ip="172.20.10.5", port=8888)
+# stream_manager.start()

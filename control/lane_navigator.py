@@ -1041,4 +1041,4 @@ if __name__ == "__main__":
     main()
 
 lane_nav = LaneNavigator()
-lane_nav.load_config("E:\PTIT\Hoc Ky I nam IV\Iot va ung dung\IOTD22CN2\lane_nav_config.json")
+lane_nav.load_config("lane_nav_config.json")

@@ -1,48 +1,83 @@
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "esp_camera.h"
-#include <WebServer.h>
 
 // ======================= CẤU HÌNH WIFI + SERVER =======================
 
-const char* ssid = "PTIT.HCM_SV";
-const char* password = "";
+const char* ssid = "Nokia 1280";
+const char* password = "12345678";
 
-const char* serverUrl1 = "http://10.251.4.3:8000/api/command/";
-const char* serverUrl2 = "http://10.251.13.206:8000/api/command/";
-
+const char* serverUrl1 = "http://172.20.10.6:8000/api/command/";
+const char* serverUrl2 = "http://10.251.1.1:8000/api/command/";
 const char* currentServerUrl = serverUrl1;
+
+// ======================= UDP CONFIG =======================
+
+WiFiUDP udp;
+const int UDP_PORT = 8888;
+const int CHUNK_SIZE = 1400;
+
+IPAddress clientIP;
+uint16_t clientPort = 0;
+volatile bool hasClient = false;
 
 // ======================= CẤU HÌNH US-100 =======================
 
-#define TRIG_PIN 14  // GPIO14 cho Trigger
-#define ECHO_PIN 21  // GPIO21 cho Echo
+#define TRIG_PIN 14
+#define ECHO_PIN 21
+#define DISTANCE_STOP 20
 
-// Ngưỡng khoảng cách (cm)
-#define DISTANCE_STOP 20  // Dừng khi < 20cm
+volatile float currentDistance = 100.0;
+volatile bool obstacleDetected = false;
 
-volatile float currentDistance = 100.0;  // Khoảng cách hiện tại (cm)
-volatile bool obstacleDetected = false;  // Cờ phát hiện vật cản
+// ======================= CẤU HÌNH LINE SENSOR =======================
 
-// ======================= CẤU HÌNH SPEED / MOTOR =======================
+#define LINE_LEFT_PIN   47
+#define LINE_RIGHT_PIN  48
+
+// ⚠️ QUAN TRỌNG: Điều chỉnh theo loại cảm biến của bạn
+// TRUE  = Sensor output LOW khi cán vạch đen (phổ biến nhất)
+// FALSE = Sensor output HIGH khi cán vạch đen
+#define LINE_ACTIVE_LOW false 
+
+// Trạng thái line sensor
+volatile bool leftLineDetected = false;
+volatile bool rightLineDetected = false;
+volatile bool lineOverrideActive = false;
+
+#define LINE_TURN_DURATION 150
+volatile unsigned long lineOverrideEndTime = 0;
+
+enum LineCommand {
+  LINE_CMD_NONE = 0,
+  LINE_CMD_LEFT,
+  LINE_CMD_RIGHT,
+  LINE_CMD_BACKWARD
+};
+volatile LineCommand lineOverrideCmd = LINE_CMD_NONE;
+
+// Debug counter
+volatile unsigned long lineDebugCounter = 0;
+
+// ======================= CẤU HÌNH MOTOR =======================
 
 const int kickstartspeed = 200;
-const int maxspeed = 255;
-const int kickstarttime = 120;
+const int kickstarttime = 130;
 
 const char* currenttask = "stop";
-const char* lastServerCommand = "stop";  // Lưu lệnh cuối từ server
+const char* lastServerCommand = "stop";
 
-// Motor pins
 #define ENA 46
 #define IN1 38
 #define IN2 39
 #define ENB 40
-#define IN3 41
+#define IN3 41  
 #define IN4 42
 
-// Camera pins cho ESP32-S3-CAM
+// ======================= CAMERA PINS =======================
+
 #define PWDN_GPIO_NUM -1
 #define RESET_GPIO_NUM -1
 #define XCLK_GPIO_NUM 15
@@ -60,83 +95,136 @@ const char* lastServerCommand = "stop";  // Lưu lệnh cuối từ server
 #define HREF_GPIO_NUM 7
 #define PCLK_GPIO_NUM 13
 
-WebServer server(80);
+// ======================= TASK HANDLES =======================
 
-// Task handles
-TaskHandle_t cameraTaskHandle;
-TaskHandle_t motorTaskHandle;
-TaskHandle_t ultrasonicTaskHandle;
+TaskHandle_t motorTaskHandle = NULL;
+TaskHandle_t ultrasonicTaskHandle = NULL;
+TaskHandle_t cameraStreamTaskHandle = NULL;
+TaskHandle_t lineSensorTaskHandle = NULL;
 
-// Shared variables
+// ======================= SHARED VARIABLES =======================
+
 volatile int currentSpeed = 110;
-volatile int lastServerSpeed = 110;  // Lưu speed cuối từ server
-volatile bool motorTaskRunning = false;
-volatile bool wasObstacleBlocking = false;  // Cờ theo dõi trạng thái vật cản trước đó
+volatile int lastServerSpeed = 110;
+volatile bool wasObstacleBlocking = false;
 
-// PWM Configuration
 const int pwmFreq = 5000;
 const int pwmResolution = 8;
 
-// ======================= US-100 FUNCTIONS =======================
+portMUX_TYPE lineMux = portMUX_INITIALIZER_UNLOCKED;
+
+// ======================= FORWARD DECLARATIONS =======================
+
+void kickStart(int speed);
+void moveForward(int speed);
+void moveBackward(int speed);
+void turnLeft(int speed);
+void turnRight(int speed);
+void stopCar();
+void executeCommand(const char* command, int speed);
+void executeDirectCommand(const char* command, int speed);
+
+// ======================= US-100 =======================
 
 float measureDistance() {
-  // Gửi xung trigger
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-  // Đọc thời gian phản hồi (timeout 30ms ~ 5m)
   long duration = pulseIn(ECHO_PIN, HIGH, 30000);
-
-  if (duration == 0) {
-    return 999.0;  // Không có phản hồi = xa hoặc lỗi
-  }
-
-  // Tính khoảng cách (cm)
-  float distance = duration * 0.034 / 2.0;
-
-  return distance;
+  if (duration == 0) return 999.0;
+  return duration * 0.034 / 2.0;
 }
 
-// Task đọc khoảng cách liên tục (Core 0)
 void ultrasonicTask(void* parameter) {
-  const int numReadings = 3;  // Số lần đọc để lọc nhiễu
-  float readings[numReadings];
-  int readIndex = 0;
-
-  // Khởi tạo mảng
-  for (int i = 0; i < numReadings; i++) {
-    readings[i] = 100.0;
-  }
+  Serial.println("🔊 Ultrasonic Task Started");
+  
+  float readings[3] = {100.0, 100.0, 100.0};
+  int idx = 0;
 
   while (true) {
-    // Đọc khoảng cách
-    float distance = measureDistance();
+    readings[idx] = measureDistance();
+    idx = (idx + 1) % 3;
 
-    // Lọc nhiễu bằng trung bình động
-    readings[readIndex] = distance;
-    readIndex = (readIndex + 1) % numReadings;
-
-    float sum = 0;
-    for (int i = 0; i < numReadings; i++) {
-      sum += readings[i];
-    }
-    currentDistance = sum / numReadings;
-
-    // Cập nhật cờ phát hiện vật cản
-    bool previousObstacle = obstacleDetected;
+    currentDistance = (readings[0] + readings[1] + readings[2]) / 3.0;
+    
+    bool prev = obstacleDetected;
     obstacleDetected = (currentDistance < DISTANCE_STOP);
 
-    // Debug output (chỉ in khi có thay đổi trạng thái)
-    if (previousObstacle != obstacleDetected) {
-      Serial.printf("🔔 Distance: %.1f cm | Obstacle: %s\n",
-                    currentDistance,
-                    obstacleDetected ? "⛔ YES - BLOCKING" : "✅ NO - CLEAR");
+    if (prev != obstacleDetected) {
+      Serial.printf("🔔 %.1fcm | %s\n", currentDistance, obstacleDetected ? "⛔BLOCK" : "✅CLEAR");
     }
 
-    vTaskDelay(50 / portTICK_PERIOD_MS);  // Đọc mỗi 50ms
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+// ======================= LINE SENSOR TASK =======================
+
+void lineSensorTask(void* parameter) {
+  Serial.println("📏 Line Sensor Task Started");
+  Serial.printf("   Config: ACTIVE_LOW=%s\n", LINE_ACTIVE_LOW ? "true" : "false");
+  
+  unsigned long lastDebugTime = 0;
+  
+  while (true) {
+    // Đọc RAW values
+    int leftRaw = digitalRead(LINE_LEFT_PIN);
+    int rightRaw = digitalRead(LINE_RIGHT_PIN);
+    
+    // Xử lý logic theo cấu hình
+    bool left, right;
+    if (LINE_ACTIVE_LOW) {
+      // LOW = cán vạch đen
+      left = (leftRaw == LOW);
+      right = (rightRaw == LOW);
+    } else {
+      // HIGH = cán vạch đen
+      left = (leftRaw == HIGH);
+      right = (rightRaw == HIGH);
+    }
+    
+    unsigned long now = millis();
+    
+    // Debug mỗi 500ms
+    if (now - lastDebugTime >= 500) {
+      lastDebugTime = now;
+      Serial.printf("📏 RAW: L=%d R=%d | Detected: L=%d R=%d | Override=%d\n",
+                    leftRaw, rightRaw, left, right, lineOverrideActive);
+    }
+    
+    portENTER_CRITICAL(&lineMux);
+    leftLineDetected = left;
+    rightLineDetected = right;
+    
+    if (left || right) {
+      // Có cán vạch
+      lineOverrideActive = true;
+      lineOverrideEndTime = now + LINE_TURN_DURATION;
+      
+      if (left && right) {
+        lineOverrideCmd = LINE_CMD_BACKWARD;
+        lineOverrideEndTime = now + LINE_TURN_DURATION * 2;
+      } else if (left) {
+        lineOverrideCmd = LINE_CMD_RIGHT;
+      } else {
+        lineOverrideCmd = LINE_CMD_LEFT;
+      }
+    } else {
+      // Không cán vạch - kiểm tra timeout
+      if (lineOverrideActive) {
+        if (now >= lineOverrideEndTime) {
+          lineOverrideActive = false;
+          lineOverrideCmd = LINE_CMD_NONE;
+          Serial.println("✅ Line override ENDED - back to server control");
+        }
+      }
+    }
+    portEXIT_CRITICAL(&lineMux);
+    
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
@@ -163,37 +251,312 @@ void setupCamera() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_VGA;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.jpeg_quality = 15;
-  config.fb_count = 1;
-
-  if (psramFound()) {
-    config.jpeg_quality = 12;
-    config.fb_count = 2;
-    config.grab_mode = CAMERA_GRAB_LATEST;
-  }
+  
+  config.frame_size = FRAMESIZE_VGA;
+  config.jpeg_quality = 30;
+  config.fb_count = 2;
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("Camera init failed with error 0x%x", err);
+    Serial.printf("❌ Camera init failed: 0x%x\n", err);
     return;
   }
-  Serial.println("Camera initialized");
+  
+  Serial.println("✅ Camera: VGA 640x480");
+}
+
+// ======================= UDP SEND FRAME =======================
+
+void sendFrameUDP(camera_fb_t* fb, uint16_t frameId) {
+  if (!hasClient || fb == NULL) return;
+  
+  uint16_t totalPackets = (fb->len + CHUNK_SIZE - 1) / CHUNK_SIZE;
+  uint8_t header[8];
+  
+  size_t offset = 0;
+  uint16_t packetIndex = 0;
+  
+  while (offset < fb->len) {
+    size_t chunkLen = min((size_t)CHUNK_SIZE, fb->len - offset);
+    
+    header[0] = frameId & 0xFF;
+    header[1] = (frameId >> 8) & 0xFF;
+    header[2] = packetIndex & 0xFF;
+    header[3] = (packetIndex >> 8) & 0xFF;
+    header[4] = totalPackets & 0xFF;
+    header[5] = (totalPackets >> 8) & 0xFF;
+    header[6] = 0;
+    header[7] = 0;
+    
+    udp.beginPacket(clientIP, clientPort);
+    udp.write(header, 8);
+    udp.write(fb->buf + offset, chunkLen);
+    udp.endPacket();
+    
+    offset += chunkLen;
+    packetIndex++;
+    
+    delayMicroseconds(50);
+  }
+}
+
+// ======================= CAMERA STREAM TASK =======================
+
+void cameraStreamTask(void* parameter) {
+  Serial.println("📹 Camera Stream Task Started");
+  
+  uint32_t frameCount = 0;
+  uint16_t frameId = 0;
+  unsigned long lastFpsTime = millis();
+  
+  while (true) {
+    int packetSize = udp.parsePacket();
+    if (packetSize > 0) {
+      clientIP = udp.remoteIP();
+      clientPort = udp.remotePort();
+      hasClient = true;
+      
+      char buffer[32];
+      udp.read(buffer, min(packetSize, 31));
+      buffer[min(packetSize, 31)] = '\0';
+      
+      Serial.printf("🔗 Client: %s:%d - %s\n", 
+                    clientIP.toString().c_str(), clientPort, buffer);
+    }
+    
+    if (hasClient) {
+      camera_fb_t* fb = esp_camera_fb_get();
+      
+      if (fb) {
+        sendFrameUDP(fb, frameId);
+        frameId++;
+        frameCount++;
+        
+        if (millis() - lastFpsTime >= 2000) {
+          float fps = frameCount / 2.0;
+          Serial.printf("📊 FPS: %.1f\n", fps);
+          frameCount = 0;
+          lastFpsTime = millis();
+        }
+        
+        esp_camera_fb_return(fb);
+      }
+      
+      vTaskDelay(pdMS_TO_TICKS(5));
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(100));
+    }
+  }
+}
+
+// ======================= HELPER =======================
+
+const char* getLineCmdString(LineCommand cmd) {
+  switch (cmd) {
+    case LINE_CMD_LEFT:     return "left";
+    case LINE_CMD_RIGHT:    return "right";
+    case LINE_CMD_BACKWARD: return "backward";
+    default:                return "none";
+  }
+}
+
+// ======================= MOTOR TASK =======================
+
+void motorTask(void* parameter) {
+  Serial.println("🚗 Motor Task Started");
+  
+  HTTPClient http;
+  unsigned long lastHttpTime = 0;
+  unsigned long lastMotorDebug = 0;
+  const unsigned long HTTP_INTERVAL = 100;
+
+  while (true) {
+    unsigned long now = millis();
+    
+    // Debug motor state mỗi 1 giây
+    if (now - lastMotorDebug >= 1000) {
+      lastMotorDebug = now;
+      
+      portENTER_CRITICAL(&lineMux);
+      bool la = lineOverrideActive;
+      LineCommand lc = lineOverrideCmd;
+      portEXIT_CRITICAL(&lineMux);
+      
+      Serial.printf("🚗 State: obstacle=%d, lineOverride=%d, lineCmd=%s, task=%s\n",
+                    obstacleDetected, la, getLineCmdString(lc), currenttask);
+    }
+    
+    // // ===== PRIORITY 1: OBSTACLE =====
+    // if (obstacleDetected) {
+    //   if (!wasObstacleBlocking) {
+    //     Serial.println("⛔ OBSTACLE DETECTED!");
+    //     wasObstacleBlocking = true;
+    //   }
+      
+    //   if (strcmp(lastServerCommand, "backward") == 0) {
+    //     executeDirectCommand("backward", lastServerSpeed);
+    //   } else if (strcmp(lastServerCommand, "left") == 0) {
+    //     executeDirectCommand("left", lastServerSpeed);
+    //   } else if (strcmp(lastServerCommand, "right") == 0) {
+    //     executeDirectCommand("right", lastServerSpeed);
+    //   } else {
+    //     stopCar();
+    //     currenttask = "stop";
+    //   }
+      
+    //   vTaskDelay(pdMS_TO_TICKS(50));
+    //   continue;
+    // }
+
+    // if (wasObstacleBlocking) {
+    //   Serial.println("✅ Obstacle Clear!");
+    //   wasObstacleBlocking = false;
+    // }
+
+    // ===== PRIORITY 2: LINE SENSOR =====
+    bool lineActive;
+    LineCommand lineCmd;
+    
+    portENTER_CRITICAL(&lineMux);
+    lineActive = lineOverrideActive;
+    lineCmd = lineOverrideCmd;
+    portEXIT_CRITICAL(&lineMux);
+    
+    if (lineActive && lineCmd != LINE_CMD_NONE) {
+      const char* cmdStr = getLineCmdString(lineCmd);
+      Serial.printf("📏 LINE OVERRIDE: %s\n", cmdStr);
+      executeDirectCommand(cmdStr, 150);
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
+    // ===== PRIORITY 3: SERVER COMMAND =====
+    if (WiFi.status() == WL_CONNECTED && (now - lastHttpTime >= HTTP_INTERVAL)) {
+      lastHttpTime = now;
+      
+      http.begin(currentServerUrl);
+      http.setTimeout(500);
+      int httpCode = http.GET();
+
+      if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        StaticJsonDocument<128> doc;
+        
+        if (!deserializeJson(doc, payload)) {
+          const char* cmd = doc["command"];
+          int spd = doc["speed"] | currentSpeed;
+          currentSpeed = spd;
+          lastServerCommand = cmd;
+          lastServerSpeed = spd;
+          
+          Serial.printf("🌐 SERVER: cmd=%s, speed=%d\n", cmd, spd);
+          executeCommand(cmd, spd);
+        }
+      } else if (httpCode < 0) {
+        // Không log liên tục lỗi HTTP
+      }
+      http.end();
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+// ======================= SETUP =======================
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  
+  Serial.println("\n========================================");
+  Serial.println("🚗 ESP32-S3 Car - DEBUG VERSION");
+  Serial.println("========================================");
+
+  // Ultrasonic
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  Serial.printf("✅ Ultrasonic: TRIG=%d, ECHO=%d\n", TRIG_PIN, ECHO_PIN);
+  
+  // Line sensor
+  pinMode(LINE_LEFT_PIN, INPUT_PULLUP);
+  pinMode(LINE_RIGHT_PIN, INPUT_PULLUP);
+  Serial.printf("✅ Line Sensors: LEFT=GPIO%d, RIGHT=GPIO%d\n", LINE_LEFT_PIN, LINE_RIGHT_PIN);
+  
+  // Test đọc line sensor 5 lần
+  Serial.println("📏 Testing Line Sensors (5 reads):");
+  for (int i = 0; i < 5; i++) {
+    delay(100);
+    int l = digitalRead(LINE_LEFT_PIN);
+    int r = digitalRead(LINE_RIGHT_PIN);
+    Serial.printf("   Read %d: LEFT=%d, RIGHT=%d\n", i+1, l, r);
+  }
+  Serial.printf("   Expected when NO line: LEFT=1, RIGHT=1 (if ACTIVE_LOW)\n");
+  Serial.printf("   Expected when ON line: LEFT=0, RIGHT=0 (if ACTIVE_LOW)\n");
+  
+  // Motor
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  ledcAttach(ENA, pwmFreq, pwmResolution);
+  ledcAttach(ENB, pwmFreq, pwmResolution);
+  Serial.println("✅ Motor pins configured");
+
+  // WiFi
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  Serial.print("📶 WiFi connecting");
+  
+  int wifiTimeout = 0;
+  while (WiFi.status() != WL_CONNECTED && wifiTimeout < 30) {
+    delay(500);
+    Serial.print(".");
+    wifiTimeout++;
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("\n✅ WiFi connected! IP: %s\n", WiFi.localIP().toString().c_str());
+  } else {
+    Serial.println("\n⚠️ WiFi failed!");
+  }
+
+  setupCamera();
+
+  udp.begin(UDP_PORT);
+  Serial.printf("✅ UDP Port: %d\n", UDP_PORT);
+
+  stopCar();
+
+  // Tasks
+  Serial.println("\n📋 Creating Tasks...");
+  
+  xTaskCreatePinnedToCore(lineSensorTask, "LineSensor", 4096, NULL, 4, &lineSensorTaskHandle, 0);
+  delay(100);
+  
+  xTaskCreatePinnedToCore(ultrasonicTask, "Ultrasonic", 4096, NULL, 3, &ultrasonicTaskHandle, 0);
+  delay(100);
+  
+  xTaskCreatePinnedToCore(motorTask, "Motor", 8192, NULL, 2, &motorTaskHandle, 0);
+  delay(100);
+  
+  xTaskCreatePinnedToCore(cameraStreamTask, "CameraStream", 8192, NULL, 2, &cameraStreamTaskHandle, 1);
+
+  Serial.println("\n========================================");
+  Serial.println("🚗 System Ready - Watch Serial for DEBUG");
+  Serial.println("========================================\n");
+}
+
+// ======================= LOOP =======================
+
+void loop() {
+  vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
 // ======================= MOTOR FUNCTIONS =======================
 
-void kickStart(int speed);
-void moveForward(int speed);
-void moveBackward(int speed);
-void turnLeft(int speed);
-void turnRight(int speed);
-void stopCar();
-
-// Hàm thực thi lệnh motor
 void executeCommand(const char* command, int speed) {
   if (strcmp(command, currenttask) != 0 && strcmp(command, "forward") == 0) {
     kickStart(kickstartspeed);
@@ -217,219 +580,19 @@ void executeCommand(const char* command, int speed) {
   }
 }
 
-// ======================= MOTOR TASK (CORE 0) =======================
-
-void motorTask(void* parameter) {
-  motorTaskRunning = true;
-  HTTPClient http;
-
-  while (true) {
-    // ========== KIỂM TRA VẬT CẢN TRƯỚC ==========
-    if (obstacleDetected) {
-      // Có vật cản -> DỪNG XE NGAY LẬP TỨC
-      if (!wasObstacleBlocking) {
-        Serial.println("⛔ OBSTACLE DETECTED! Emergency stop - Ignoring server commands");
-        wasObstacleBlocking = true;
-      }
-      
-      // Chỉ dừng nếu đang tiến về phía trước
-      if (strcmp(currenttask, "forward") == 0 || strcmp(currenttask, "stop") != 0) {
-        // Cho phép lùi và quay khi có vật cản phía trước
-        if (strcmp(lastServerCommand, "backward") == 0) {
-          executeCommand("backward", lastServerSpeed);
-        } else if (strcmp(lastServerCommand, "left") == 0) {
-          executeCommand("left", lastServerSpeed);
-        } else if (strcmp(lastServerCommand, "right") == 0) {
-          executeCommand("right", lastServerSpeed);
-        } else {
-          // Dừng nếu lệnh là forward hoặc stop
-          currenttask = "stop";
-          stopCar();
-        }
-      }
-      
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-      continue;  // Bỏ qua việc đọc lệnh từ server khi có vật cản (trừ lùi/quay)
-    }
-
-    // ========== KHÔNG CÓ VẬT CẢN -> XỬ LÝ LỆNH SERVER ==========
-    
-    // Kiểm tra nếu vừa thoát khỏi trạng thái vật cản
-    if (wasObstacleBlocking) {
-      Serial.println("✅ Obstacle cleared! Resuming server commands");
-      wasObstacleBlocking = false;
-      
-      // Tiếp tục thực hiện lệnh cuối từ server
-      Serial.printf("▶️ Resuming last command: %s at speed %d\n", lastServerCommand, lastServerSpeed);
-      executeCommand(lastServerCommand, lastServerSpeed);
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-      const char* primary = currentServerUrl;
-      const char* secondary = (currentServerUrl == serverUrl1) ? serverUrl2 : serverUrl1;
-
-      int httpCode = -1;
-      String payload;
-
-      http.begin(primary);
-      http.setTimeout(1500);
-      httpCode = http.GET();
-
-      if (httpCode == HTTP_CODE_OK) {
-        payload = http.getString();
-      } else if (secondary && strlen(secondary) > 0) {
-        http.end();
-        http.begin(secondary);
-        http.setTimeout(1500);
-        int httpCode2 = http.GET();
-        if (httpCode2 == HTTP_CODE_OK) {
-          payload = http.getString();
-          httpCode = httpCode2;
-          currentServerUrl = secondary;
-          Serial.println("Switched to backup server");
-        }
-      }
-
-      if (httpCode == HTTP_CODE_OK) {
-        StaticJsonDocument<200> doc;
-        DeserializationError error = deserializeJson(doc, payload);
-
-        if (!error) {
-          const char* command = doc["command"];
-          int speed = doc["speed"] | currentSpeed;
-          currentSpeed = speed;
-
-          // Lưu lệnh và speed từ server
-          lastServerCommand = command;
-          lastServerSpeed = speed;
-
-          // Thực thi lệnh
-          executeCommand(command, speed);
-        }
-      }
-
-      http.end();
-    }
-
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+void executeDirectCommand(const char* command, int speed) {
+  if (strcmp(command, "forward") == 0) {
+    moveForward(speed);
+  } else if (strcmp(command, "backward") == 0) {
+    moveBackward(speed);
+  } else if (strcmp(command, "left") == 0) {
+    turnLeft(speed);
+  } else if (strcmp(command, "right") == 0) {
+    turnRight(speed);
+  } else if (strcmp(command, "stop") == 0) {
+    stopCar();
   }
 }
-
-// ======================= CAMERA STREAM HANDLER =======================
-
-void handleStream() {
-  WiFiClient client = server.client();
-  String response = "HTTP/1.1 200 OK\r\n";
-  response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
-  client.print(response);
-
-  const int64_t frameInterval = 120000;
-  int64_t lastFrameTime = 0;
-
-  while (client.connected()) {
-    int64_t currentTime = esp_timer_get_time();
-
-    if (currentTime - lastFrameTime > frameInterval) {
-      camera_fb_t* fb = esp_camera_fb_get();
-      if (!fb) {
-        Serial.println("Camera capture failed");
-        break;
-      }
-
-      client.print("--frame\r\n");
-      client.print("Content-Type: image/jpeg\r\n");
-      client.printf("Content-Length: %u\r\n\r\n", fb->len);
-      client.write(fb->buf, fb->len);
-      client.print("\r\n");
-
-      esp_camera_fb_return(fb);
-      lastFrameTime = currentTime;
-    }
-
-    vTaskDelay(1);
-  }
-}
-
-// ======================= SETUP =======================
-
-void setup() {
-  Serial.begin(115200);
-  Serial.println("ESP32-S3 Car Control + US-100 Starting...");
-
-  // US-100 pins
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
-  digitalWrite(TRIG_PIN, LOW);
-
-  // Motor pins
-  pinMode(IN1, OUTPUT);
-  pinMode(IN2, OUTPUT);
-  pinMode(IN3, OUTPUT);
-  pinMode(IN4, OUTPUT);
-
-  // PWM
-  ledcAttach(ENA, pwmFreq, pwmResolution);
-  ledcAttach(ENB, pwmFreq, pwmResolution);
-
-  // WiFi
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-
-  // Camera
-  setupCamera();
-
-  // Web server endpoints
-  server.on("/stream", handleStream);
-  server.on("/test", []() {
-    server.send(200, "text/plain", "ESP32-S3 Car Control + US-100 Active");
-  });
-
-  server.begin();
-  Serial.println("HTTP server started");
-
-  // US-100 Task on Core 0 (priority 2 - cao hơn motor task)
-  xTaskCreatePinnedToCore(
-    ultrasonicTask,
-    "UltrasonicTask",
-    4096,
-    NULL,
-    2,
-    &ultrasonicTaskHandle,
-    0);
-
-  // Motor task on Core 0 (priority 1)
-  xTaskCreatePinnedToCore(
-    motorTask,
-    "MotorTask",
-    8192,
-    NULL,
-    1,
-    &motorTaskHandle,
-    0);
-
-  stopCar();
-
-  Serial.println("===========================================");
-  Serial.println("Setup complete!");
-  Serial.println("Camera stream: http://" + WiFi.localIP().toString() + "/stream");
-  Serial.println("Obstacle detection: Active (< 20cm = STOP)");
-  Serial.println("===========================================");
-}
-
-// ======================= LOOP =======================
-
-void loop() {
-  server.handleClient();
-  vTaskDelay(1);
-}
-
-// ======================= MOTOR HELPERS =======================
 
 void kickStart(int speed) {
   digitalWrite(IN1, HIGH);
@@ -438,7 +601,7 @@ void kickStart(int speed) {
   digitalWrite(IN4, HIGH);
   ledcWrite(ENA, speed);
   ledcWrite(ENB, speed);
-  delay(kickstarttime);
+  vTaskDelay(pdMS_TO_TICKS(kickstarttime));
 }
 
 void turnRight(int speed) {
@@ -446,8 +609,8 @@ void turnRight(int speed) {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
-  ledcWrite(ENA, 180);
-  ledcWrite(ENB, speed - 10);
+  ledcWrite(ENA, speed);
+  ledcWrite(ENB, 90);
 }
 
 void turnLeft(int speed) {
@@ -455,8 +618,8 @@ void turnLeft(int speed) {
   digitalWrite(IN2, HIGH);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-  ledcWrite(ENA, speed - 10);
-  ledcWrite(ENB, 180);
+  ledcWrite(ENA, 90);
+  ledcWrite(ENB, speed);
 }
 
 void moveBackward(int speed) {

@@ -47,7 +47,7 @@ class CarControl:
         self._lock = threading.Lock()
 
         # ===== PAUSE CONTROL (MỚI) =====
-        self._paused = True
+        self._paused = False
         self._pause_lock = threading.Lock()
         self._pause_event = threading.Event()
         self._pause_event.set()  # Mặc định không pause (event được set)

@@ -136,7 +136,7 @@ class StreamManager:
 
 
 def main():
-    esp_ip = "10.251.0.62"
+    esp_ip = "192.168.1.23"
     udp_port = 8888
     stream_manager = StreamManager(esp_ip, udp_port)
     stream_manager.start()
@@ -159,5 +159,5 @@ def main():
 if __name__ == "__main__":
     main()
 
-stream_manager = StreamManager(esp_ip="10.251.0.62", port=8888)
+stream_manager = StreamManager(esp_ip="192.168.1.23", port=8888)
 stream_manager.start()
