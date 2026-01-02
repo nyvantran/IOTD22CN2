@@ -112,6 +112,7 @@ class StreamManager:
         while self.get_latest_frame() is None:
             time.sleep(1)  # Chờ cho đến khi có frame đầu tiên
             self.register_with_esp()
+
         print("Frame đầu tiên đã sẵn sàng.")
 
     def stop(self):

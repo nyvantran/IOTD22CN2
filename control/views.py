@@ -26,6 +26,8 @@ MIN_CONFIDENCE = 0.40
 # Biến lưu trạng thái hiện tại
 current_command = {'command': 'stop', 'speed': 100}
 last_analysis_result = {"detections": [], "status": "idle"}
+# Phần tăng/giảm tốc khi rẽ 
+turn_adjust_speed = 0
 
 
 def index(request):
@@ -35,11 +37,25 @@ def index(request):
 @api_view(['GET'])
 def get_command(request):
     """API endpoint để ESP32 lấy lệnh"""
-    cmd, speed = car_control.get_command()
-    # global current_command
-    # cmd, speed = current_command['command'], current_command['speed']
-    print("GET COMMAND:", cmd, speed)
-    current_command = {'command': cmd, 'speed': speed}
+
+    global current_command, turn_adjust_speed
+
+    cmd, base_speed = car_control.get_command()
+
+    # Mặc định dùng tốc độ base
+    send_speed = base_speed
+
+    # Nếu đang rẽ thì cộng thêm phần điều chỉnh
+    if cmd in ('left', 'right'):
+        send_speed = base_speed + turn_adjust_speed
+
+    # Giới hạn trong khoảng hợp lệ PWM
+    send_speed = max(0, min(255, int(send_speed)))
+
+    current_command = {'command': cmd, 'speed': send_speed}
+
+    print("GET COMMAND:", cmd, send_speed, "| base:", base_speed, "| turn_adjust:", turn_adjust_speed)
+
     return Response(current_command)
 
 
@@ -47,23 +63,35 @@ def get_command(request):
 @api_view(['POST'])
 def set_command(request):
     """API endpoint để gửi lệnh điều khiển"""
-    # global current_command
+
+    global current_command, turn_adjust_speed
 
     command = request.data.get('command', 'stop')
-    speed = request.data.get('speed', 110)
-    print("SET COMMAND:", command, speed)
+    # ép kiểu int cho chắc
+    speed = int(request.data.get('speed', 110))
+    # nếu client không gửi turn_adjust thì giữ giá trị cũ
+    turn_adjust_speed = int(request.data.get('turn_adjust', turn_adjust_speed))
+
     # Lưu lệnh vào database (optional)
     # Command.objects.create(command=command, speed=speed)
     car_control.set_speed(speed)
     car_control.set_base_speed(speed)
-    # Cập nhật lệnh hiện tại
-    # current_command = {'command': command, 'speed': speed}
+
+    # Cập nhật lệnh hiện tại (chủ yếu để debug / history)
+    current_command = {'command': command, 'speed': speed}
+
+    # Start/Stop auto
     if command == 'stop':
         car_control.pause()
     if command == 'forward':
         car_control.resume()
 
-    return Response({'status': 'success', 'command': command, 'speed': speed})
+    return Response({
+        'status': 'success',
+        'command': command,
+        'speed': speed,
+        'turn_adjust': turn_adjust_speed
+    })
 
 
 @api_view(['GET'])
