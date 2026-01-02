@@ -1,5 +1,8 @@
+import socket
 import cv2
+import numpy as np
 import threading
+from collections import defaultdict
 import time
 
 
@@ -15,39 +18,87 @@ class StreamManager:
             cls._instance = super(StreamManager, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, url="http://192.168.13.211/stream"):
+    def __init__(self, esp_ip, port, chunk_size=1400, header_size=8):
         if not hasattr(self, 'is_initialized'):
-            self.url = url
-            self.latest_frame = None
-            self.lock = threading.Lock()  # Rất quan trọng để đảm bảo thread-safe
-            self.is_running = False
+            self.esp_ip = esp_ip
+            self.port = port
+            self.chunk_size = chunk_size
+            self.header_size = header_size
+
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB buffer
+            self.sock.bind(('', port))
+            self.sock.settimeout(0.1)
+
+            self.frames = defaultdict(lambda: {'packets': {}, 'total': 0})
+            self.current_frame = None
+            self.frame_lock = threading.Lock()
+            self.running = True
+
+            # Stats
+            self.frame_count = 0
+            self.last_fps_time = time.time()
+            self.fps = 0
             self.thread = None
-            self.is_initialized = True
-            self.cap = None
+            self.is_running = False
+
+    def register_with_esp(self):
+        """Gửi packet để đăng ký với ESP32"""
+        self.sock.sendto(b"HELLO", (self.esp_ip, self.port))
+        print(f"📡 Sent registration to {self.esp_ip}:{self.port}")
 
     def _capture_loop(self):
-        """Vòng lặp chạy trong thread để lấy và giải mã frame."""
-        print(f"Bắt đầu thread lấy stream từ: {self.url}  ")
-        try:
-            self.cap = cv2.VideoCapture(self.url)
-            if not self.cap.isOpened():
-                print(f"Lỗi: Không thể mở stream từ {self.url}")
-                self.is_running = False
-                return
-            while self.is_running:
-                ret, frame = self.cap.read()
-                if not ret:
-                    print("Lỗi: Không thể đọc frame từ stream.")
-                    time.sleep(1)  # Chờ một chút trước khi thử lại
+        """Thread nhận packets"""
+        print(f"Bắt đầu thread lấy stream từ: {self.esp_ip}:{self.port}  ")
+        while self.running:
+            try:
+                data, addr = self.sock.recvfrom(self.chunk_size + self.header_size + 100)
+
+                if len(data) < 8:
                     continue
 
-                with self.lock:
-                    self.latest_frame = frame.copy()
-        except Exception as e:
-            print(f"Lỗi không xác định trong luồng: {e}")
-        finally:
-            print("Thread lấy stream đã dừng.")
-            self.is_running = False
+                # Parse header
+                frame_id = data[0] | (data[1] << 8)
+                packet_idx = data[2] | (data[3] << 8)
+                total_packets = data[4] | (data[5] << 8)
+                payload = data[8:]
+
+                # Store packet
+                frame_data = self.frames[frame_id]
+                frame_data['packets'][packet_idx] = payload
+                frame_data['total'] = total_packets
+
+                # Check if frame complete
+                if len(frame_data['packets']) == total_packets:
+                    # Reassemble frame
+                    frame_bytes = b''.join(frame_data['packets'][i] for i in range(total_packets))
+                    np_arr = np.frombuffer(frame_bytes, np.uint8)
+                    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+                    with self.frame_lock:
+                        self.current_frame = frame
+                        self.frame_count += 1
+
+                    # FPS calculation
+                    current_time = time.time()
+                    if current_time - self.last_fps_time >= 1.0:
+                        self.fps = self.frame_count
+                        self.frame_count = 0
+                        self.last_fps_time = current_time
+                        if self.fps < 15:
+                            self.register_with_esp()
+                            print("fps down: ", self.fps)
+                            
+
+                    # Clear stored packets for this frame
+                    del self.frames[frame_id]
+
+            except socket.timeout:
+                continue
+            except Exception as e:
+                print(f"Lỗi không xác định trong luồng: {e}")
+        print("Thread lấy stream đã dừng.")
+        self.is_running = False
 
     def start(self):
         """Bắt đầu background thread."""
@@ -56,29 +107,63 @@ class StreamManager:
             self.thread = threading.Thread(target=self._capture_loop, daemon=True)
             self.thread.start()
             print("Stream manager đã khởi động.")
+            self.register_with_esp()
         while self.get_latest_frame() is None:
-            time.sleep(0.1)  # Chờ cho đến khi có frame đầu tiên
+            self.register_with_esp()
+            time.sleep(1)  # Chờ cho đến khi có frame đầu tiên
         print("Frame đầu tiên đã sẵn sàng.")
 
     def stop(self):
         """Dừng background thread."""
-        self.is_running = False
+        self.running = False
         if self.thread and self.thread.is_alive():
             self.thread.join()  # Chờ thread kết thúc
         print("Stream manager đã dừng.")
 
+    def get_fps(self):
+        """Lấy FPS hiện tại."""
+        now = time.time()
+        if now - self.last_fps_time >= 1.0:
+            self.fps = self.frame_count / (now - self.last_fps_time)
+            self.frame_count = 0
+            self.last_fps_time = now
+        return self.fps
+
     def get_latest_frame(self):
         """Lấy frame mới nhất một cách an toàn."""
         frame = None
-        with self.lock:
-            if self.latest_frame is not None:
-                frame = self.latest_frame.copy()
+        with self.frame_lock:
+            if self.current_frame is not None:
+                frame = self.current_frame.copy()
         return frame
 
 
+def main():
+    esp_ip = "10.251.1.141"
+    udp_port = 8888
+    stream_manager = StreamManager(esp_ip, udp_port)
+    stream_manager.start()
+    # stream_manager.register_with_esp()
+    print("🎥 Waiting for stream... Press 'q' to quit")
+    try:
+        while True:
+            frame = stream_manager.get_latest_frame()
+            cv2.putText(frame, f"FPS: {stream_manager.get_fps():.1f}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            if frame is not None:
+                cv2.imshow("Video Stream", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+    finally:
+        stream_manager.stop()
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()
+
 # Tạo một instance duy nhất (singleton) để toàn bộ ứng dụng sử dụng
-URL_STREAM = "http://10.251.13.211/stream"
-stream_manager = StreamManager(url=URL_STREAM)
+stream_manager = StreamManager(esp_ip="10.251.1.141",port=8888)
 # stream_manager.start()
 # cv2.imwrite("test.jpg", stream_manager.get_latest_frame())
 # stream_manager.stop()

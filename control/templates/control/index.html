@@ -258,19 +258,8 @@
             <h2>Điều khiển</h2>
 
             <div class="controls">
-              <button class="empty"></button>
-              <button onclick="sendCommand('forward')">⬆️ Tiến</button>
-              <button class="empty"></button>
-
-              <button onclick="sendCommand('left')">⬅️ Trái</button>
-              <button class="stop" onclick="sendCommand('stop')">
-                ⏹️ Dừng
-              </button>
-              <button onclick="sendCommand('right')">➡️ Phải</button>
-
-              <button class="empty"></button>
-              <button onclick="sendCommand('backward')">⬇️ Lùi</button>
-              <button class="empty"></button>
+              <button onclick="sendStart()">▶️ Start (Auto)</button>
+              <button class="stop" onclick="sendStop()">⏹️ Stop</button>
             </div>
 
             <div class="speed-control">
@@ -285,17 +274,36 @@
                 oninput="updateSpeed(this.value)"
               />
             </div>
+            <div class="speed-control">
+              <label for="turnAdjust">
+                Tăng tốc khi rẽ: <span id="turnAdjustValue">0</span> </label
+              ><br />
+              <input
+                type="range"
+                id="turnAdjust"
+                min="-50"
+                max="100"
+                value="0"
+                oninput="updateTurnAdjust(this.value)"
+              />
+            </div>
           </div>
         </div>
       </div>
     </div>
 
     <script>
-      let currentSpeed = 90;
+      let currentSpeed = 100;
+      let turnAdjust = 0; // phần tăng/giảm tốc khi rẽ
 
       function updateSpeed(value) {
         currentSpeed = parseInt(value);
         document.getElementById("speedValue").textContent = currentSpeed;
+      }
+
+      function updateTurnAdjust(value) {
+        turnAdjust = parseInt(value);
+        document.getElementById("turnAdjustValue").textContent = turnAdjust;
       }
 
       async function sendCommand(command) {
@@ -308,6 +316,7 @@
             body: JSON.stringify({
               command: command,
               speed: currentSpeed,
+              turn_adjust: turnAdjust, // GỬI THÊM PHẦN ĐIỀU CHỈNH RẼ
             }),
           });
 
@@ -316,13 +325,22 @@
           if (data.status === "success") {
             document.getElementById(
               "status"
-            ).textContent = `Trạng thái: ${command.toUpperCase()} - Tốc độ: ${currentSpeed}`;
+            ).textContent = `Trạng thái: ${command.toUpperCase()} - Tốc độ: ${currentSpeed} (rẽ + ${turnAdjust})`;
           }
         } catch (error) {
           console.error("Error:", error);
           document.getElementById("status").textContent =
             "Lỗi: Không thể gửi lệnh";
         }
+      }
+
+      function sendStart() {
+        // Start = gửi forward để CarControl resume
+        sendCommand("forward");
+      }
+
+      function sendStop() {
+        sendCommand("stop");
       }
 
       // Gọi YOLO trên frame hiện tại
@@ -450,30 +468,7 @@
         }
       }
 
-      // Điều khiển bằng bàn phím: WASD + Space
-      document.addEventListener("keydown", (event) => {
-        switch (event.key) {
-          case "w":
-          case "W":
-            sendCommand("forward");
-            break;
-          case "s":
-          case "S":
-            sendCommand("backward");
-            break;
-          case "a":
-          case "A":
-            sendCommand("left");
-            break;
-          case "d":
-          case "D":
-            sendCommand("right");
-            break;
-          case " ":
-            sendCommand("stop");
-            break;
-        }
-      });
+      
 
       // Lần đầu vào trang: reset log + chạy YOLO 1 lần
       resetLaneLog();

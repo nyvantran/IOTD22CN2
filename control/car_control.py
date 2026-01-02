@@ -602,7 +602,7 @@ class CarControlAdvanced(CarControl):
                 self._set_command_with_sign_logic(final_command, self.speed, lane_info)
 
                 # ====================================================
-                time.sleep(0.02)
+                time.sleep(0.0)
 
 
             except Exception as e:

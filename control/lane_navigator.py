@@ -355,7 +355,7 @@ class LaneNavigator:
         current_width = right_x - left_x
 
         # Chỉ cập nhật nếu độ rộng hợp lý (200-800 pixels)
-        if 250 < current_width < 450:
+        if 90 < current_width < 170:
             self.lane_width_history.append(current_width)
             if len(self.lane_width_history) > self.max_history:
                 self.lane_width_history.pop(0)
@@ -478,7 +478,7 @@ class LaneNavigator:
             # Hoàn toàn mất dấu
             lane_status["confidence"] = 0.0
             return None, None, lane_status
-
+    
     def _blend_with_previous(self, estimated_fit, previous_fit, frames_elapsed):
         """Kết hợp fit ước tính với fit trước đó để mượt hơn."""
         # Trọng số cho fit trước đó giảm dần theo thời gian
@@ -602,7 +602,7 @@ class LaneNavigator:
 
         # Nếu chỉ 1 làn: bỏ offset, tăng vai trò góc + cong
         if single_lane_mode:
-            effective_k_offset *= 0.2
+            effective_k_offset = 0.0
             effective_k_angle *= 1.2
             effective_k_curvature *= 1.5
 
