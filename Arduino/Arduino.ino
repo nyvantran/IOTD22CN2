@@ -397,7 +397,7 @@ void motorTask(void* parameter) {
   HTTPClient http;
   unsigned long lastHttpTime = 0;
   unsigned long lastDebug = 0;
-  
+
   // Biến theo dõi trạng thái obstacle trước đó
   bool prevObstacle = false;
   bool stoppedByObstacle = false;
@@ -408,8 +408,8 @@ void motorTask(void* parameter) {
     // Debug mỗi 1 giây
     if (now - lastDebug >= 1000) {
       lastDebug = now;
-      Serial.printf("🚗 Task: %s | Distance: %.1fcm | Obstacle: %s\n", 
-                    currenttask, currentDistance, 
+      Serial.printf("🚗 Task: %s | Distance: %.1fcm | Obstacle: %s\n",
+                    currenttask, currentDistance,
                     obstacleDetected ? "⛔YES" : "✅NO");
     }
 
@@ -420,12 +420,12 @@ void motorTask(void* parameter) {
         // Vừa mới phát hiện vật cản
         Serial.printf("🛑 OBSTACLE DETECTED at %.1fcm - EMERGENCY STOP!\n", currentDistance);
       }
-      
+
       stopCar();
       currenttask = "stop";
       stoppedByObstacle = true;
       prevObstacle = true;
-      
+
       // Bỏ qua tất cả xử lý khác
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
@@ -551,9 +551,9 @@ void executeCommand(const char* command, int speed) {
   }
 
   if (strcmp(command, currenttask) != 0 && strcmp(currenttask, "stop") == 0) {
-    kickStart(kickstartspeed, 200);
+    kickStart(kickstartspeed, 300);
   } else if (strcmp(command, currenttask) != 0 && strcmp(command, "forward") == 0) {
-    kickStart(kickstartspeed, 50);
+    kickStart(kickstartspeed, 100);
   }
 
   if (strcmp(command, "forward") == 0) {
@@ -596,7 +596,7 @@ void executeDirectCommand(const char* command, int speed) {
 void kickStart(int speed, int time) {
   // Không kickstart nếu đang có vật cản
   if (obstacleDetected) return;
-  
+
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
