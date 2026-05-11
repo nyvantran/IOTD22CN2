@@ -8,6 +8,8 @@ from .car_control import car_control
 import base64
 from django.http import StreamingHttpResponse
 
+from .car_control import car_control
+
 from ultralytics import YOLO
 import cv2
 import numpy as np
@@ -19,11 +21,13 @@ except Exception as e:
     yolo_model = None
     print(f"====== LỖI KHI TẢI MODEL YOLO: {e} ======")
 
-MIN_CONFIDENCE = 0.50
+MIN_CONFIDENCE = 0.40
 
 # Biến lưu trạng thái hiện tại
-current_command = {'command': 'stop', 'speed': 150}
+current_command = {'command': 'stop', 'speed': 100}
 last_analysis_result = {"detections": [], "status": "idle"}
+# Phần tăng/giảm tốc khi rẽ 
+turn_adjust_speed = 0
 
 
 def index(request):
@@ -33,10 +37,25 @@ def index(request):
 @api_view(['GET'])
 def get_command(request):
     """API endpoint để ESP32 lấy lệnh"""
-    cmd, speed = car_control.get_command()
-    print("GET COMMAND:", cmd, speed)
-    # global current_command
-    current_command = {'command': cmd, 'speed': speed}
+
+    global current_command, turn_adjust_speed
+
+    cmd, base_speed = car_control.get_command()
+
+    # Mặc định dùng tốc độ base
+    send_speed = base_speed
+
+    # Nếu đang rẽ thì cộng thêm phần điều chỉnh
+    if cmd in ('left', 'right'):
+        send_speed = base_speed + turn_adjust_speed
+
+    # Giới hạn trong khoảng hợp lệ PWM
+    send_speed = max(0, min(255, int(send_speed)))
+
+    current_command = {'command': cmd, 'speed': send_speed}
+
+    print("GET COMMAND:", cmd, send_speed, "| base:", base_speed, "| turn_adjust:", turn_adjust_speed)
+
     return Response(current_command)
 
 
@@ -44,28 +63,35 @@ def get_command(request):
 @api_view(['POST'])
 def set_command(request):
     """API endpoint để gửi lệnh điều khiển"""
-    global current_command
+
+    global current_command, turn_adjust_speed
 
     command = request.data.get('command', 'stop')
-    speed = request.data.get('speed', 110)
+    # ép kiểu int cho chắc
+    speed = int(request.data.get('speed', 110))
+    # nếu client không gửi turn_adjust thì giữ giá trị cũ
+    turn_adjust_speed = int(request.data.get('turn_adjust', turn_adjust_speed))
 
     # Lưu lệnh vào database (optional)
-    Command.objects.create(command=command, speed=speed)
+    # Command.objects.create(command=command, speed=speed)
     car_control.set_speed(speed)
     car_control.set_base_speed(speed)
-    # Cập nhật lệnh hiện tại
+
+    # Cập nhật lệnh hiện tại (chủ yếu để debug / history)
     current_command = {'command': command, 'speed': speed}
+
+    # Start/Stop auto
     if command == 'stop':
         car_control.pause()
     if command == 'forward':
         car_control.resume()
-    if command == 'backward':
-        car_control.enable_dynamic_speed = ~car_control.enable_dynamic_speed
-        print("Dynamic speed:", car_control.enable_dynamic_speed)
-        print("Dynamic mode toggled.", "turn on" if car_control.enable_dynamic_speed else "turn off")
 
-    return Response({'status': 'success', 'command': command, 'speed': speed,
-                     "dynamic_speed_mode": car_control.enable_dynamic_speed})
+    return Response({
+        'status': 'success',
+        'command': command,
+        'speed': speed,
+        'turn_adjust': turn_adjust_speed
+    })
 
 
 @api_view(['GET'])
@@ -132,27 +158,6 @@ def analyze_stream_once(request):
         DetectionResult.objects.create(status="error", error_msg=str(e))
         last_analysis_result = {"detections": [], "status": "error", "error_msg": str(e)}
         return Response(last_analysis_result, status=500)
-
-
-@api_view(['GET'])
-def get_analysis_result(request):
-    global last_analysis_result
-    return Response(last_analysis_result)
-    # try:
-    #     latest_result = DetectionResult.objects.first() 
-
-    #     if latest_result:
-    #         return Response({
-    #             "detections": latest_result.detections,
-    #             "status": latest_result.status,
-    #             "error_msg": latest_result.error_msg,
-    #             "timestamp": latest_result.timestamp 
-    #         })
-    #     else:
-    #         return Response({"detections": [], "status": "idle"})
-
-    # except Exception as e:
-    #     return Response({"error": str(e)}, status=500)
 
 
 @csrf_exempt
@@ -266,3 +271,29 @@ def generate_processed_frames():
 def stream_live_feed(request):
     return StreamingHttpResponse(generate_processed_frames(),
                                  content_type='multipart/x-mixed-replace; boundary=frame')
+
+
+@api_view(['GET'])
+def get_control_info(request):
+    """
+    Trả về thông tin chi tiết từ CarControl:
+    - command hiện tại (do detect làn + logic biển báo quyết định)
+    - speed, state, fps, frame_count
+    - info chi tiết từ LaneNavigator (offset, góc, confidence, warning, ...)
+    - current_sign: biển báo mới nhất từ SignDetector (nếu có)
+    """
+    try:
+        detail = car_control.get_detailed_info()
+        # Gắn thêm thông tin biển báo từ SignDetector (nếu đã gán vào car_control)
+        current_sign = None
+        try:
+            sign_detector = getattr(car_control, "sign_detector", None)
+            if sign_detector is not None:
+                current_sign = sign_detector.get_current_sign()
+        except Exception as e:
+            current_sign = None
+
+        detail["current_sign"] = current_sign
+        return Response(detail)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
